@@ -1,0 +1,8 @@
+git init
+
+git add .
+
+git commit -m "first version"
+git remote add origin https://github.com/talkandhappy/shiny-octo-waffle.git
+git pull origin main --rebase
+git push origin main
