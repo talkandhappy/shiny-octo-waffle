@@ -2,63 +2,52 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Classroom v13</title>
-
+<title>Classroom v13 - Sync Pro</title>
 <style>
-body {
-    margin:0;
-    background:black;
-    overflow:hidden;
-}
-
-iframe {
-    width:100vw;
-    height:100vh;
-    border:none;
-}
-
-#panel {
-    position:fixed;
-    top:0;
-    width:100%;
-    background:rgba(0,0,0,0.75);
-    color:white;
-    text-align:center;
-    padding:8px;
-    z-index:10;
-}
-
-body.fullscreen #panel {
-    display:none;
-}
-
-button { margin:2px; }
+    body { margin:0; background:black; overflow:hidden; font-family: sans-serif; }
+    iframe { width:100vw; height:100vh; border:none; }
+    #panel {
+        position:fixed; top:0; width:100%;
+        background:rgba(0,0,0,0.8); color:white;
+        text-align:center; padding:10px 0; z-index:10;
+        transition: transform 0.3s;
+    }
+    body.fullscreen #panel { transform: translateY(-100%); }
+    .controls { margin-top: 8px; }
+    button { 
+        padding: 5px 15px; margin: 0 3px; cursor: pointer;
+        background: #444; color: white; border: 1px solid #666; border-radius: 4px;
+    }
+    button:hover { background: #666; }
+    .active-ver { background: #2196F3 !important; border-color: #0d47a1; }
+    #page-info { margin-left: 10px; font-weight: bold; color: #ffeb3b; }
+    hr { border: 0; border-top: 1px solid #444; margin: 8px 0; }
 </style>
 </head>
-
 <body>
 
 <div id="panel">
+    <div style="display: flex; justify-content: center; align-items: center; gap: 20px;">
+        <form action="/uploadA" method="post" enctype="multipart/form-data" style="display:inline">
+            A版: <input type="file" name="pdf" required> <button>上傳</button>
+        </form>
+        <form action="/uploadB" method="post" enctype="multipart/form-data" style="display:inline">
+            B版: <input type="file" name="pdf" required> <button>上傳</button>
+        </form>
+    </div>
 
-<form action="/uploadA" method="post" enctype="multipart/form-data">
-<input type="file" name="pdf">
-<button>Upload A</button>
-</form>
+    <hr>
 
-<form action="/uploadB" method="post" enctype="multipart/form-data">
-<input type="file" name="pdf">
-<button>Upload B</button>
-</form>
-
-<hr>
-
-<button onclick="setA()">A</button>
-<button onclick="setB()">B</button>
-<button onclick="prev()">◀</button>
-<button onclick="next()">▶</button>
-<button onclick="fs()">Fullscreen</button>
-<button onclick="qr()">QR</button>
-
+    <div class="controls">
+        <button id="btnA" onclick="setVer('A')" class="active-ver">看 A 版</button>
+        <button id="btnB" onclick="setVer('B')">看 B 版</button>
+        <span style="margin: 0 15px;">|</span>
+        <button onclick="prev()">◀ 上一頁</button>
+        <span id="page-info">Page: 1</span>
+        <button onclick="next()">下一頁 ▶</button>
+        <button onclick="fs()" style="margin-left:20px;">全螢幕</button>
+        <button onclick="qr()">QR</button>
+    </div>
 </div>
 
 <iframe id="viewer"></iframe>
@@ -67,77 +56,63 @@ button { margin:2px; }
 <script>
 const socket = io();
 
-/* =========================
-   state
-========================= */
-let state = {};
-let page = 1;
+// 核心狀態
+let state = { pdfA: null, pdfB: null, page: 1 };
+let localVersion = "A"; 
+let lastRenderedKey = ""; 
 
-/* ⭐ 每台設備自己的語言 */
-let version = "A";
-
-/* =========================
-   sync from server
-========================= */
+// 監聽後端同步狀態
 socket.on("state", (s) => {
     state = s;
-    page = s.page;
+    document.getElementById("page-info").innerText = "Page: " + state.page;
     render();
 });
 
-/* =========================
-   render（核心）
-========================= */
-function render(){
-    const file = version === "A" ? state.pdfA : state.pdfB;
+// 渲染邏輯：只有在必要時才更新 iframe
+function render() {
+    const file = localVersion === "A" ? state.pdfA : state.pdfB;
     if (!file) return;
 
-    document.getElementById("viewer").src =
-        file + "#page=" + page;
+    const currentKey = file + "#" + state.page;
+    if (currentKey !== lastRenderedKey) {
+        // 使用 URL Hash 控制 PDF 頁碼
+        document.getElementById("viewer").src = file + "#page=" + state.page;
+        lastRenderedKey = currentKey;
+    }
 }
 
-/* =========================
-   version（不同步）
-========================= */
-function setA(){ version = "A"; render(); }
-function setB(){ version = "B"; render(); }
-
-/* =========================
-   teacher sync
-========================= */
-function next(){ socket.emit("next"); }
-function prev(){ socket.emit("prev"); }
-
-/* =========================
-   fullscreen
-========================= */
-function fs(){
-    document.documentElement.requestFullscreen();
+// 切換版本 (僅影響本地端)
+function setVer(v) {
+    localVersion = v;
+    document.getElementById("btnA").classList.toggle("active-ver", v === 'A');
+    document.getElementById("btnB").classList.toggle("active-ver", v === 'B');
+    render();
 }
 
-document.addEventListener("fullscreenchange", ()=>{
+// 翻頁指令 (發送給伺服器，廣播給所有人)
+function next() { socket.emit("next"); }
+function prev() { socket.emit("prev"); }
+
+// 全螢幕切換
+function fs() {
+    if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen();
+    } else {
+        document.exitFullscreen();
+    }
+}
+
+document.addEventListener("fullscreenchange", () => {
     document.body.classList.toggle("fullscreen", !!document.fullscreenElement);
 });
 
-/* =========================
-   QR
-========================= */
-function qr(){
-    window.open("/qr");
-}
+function qr() { window.open("/qr"); }
 
-/* =========================
-   keyboard
-========================= */
-document.addEventListener("keydown", e=>{
-    if(e.key==="ArrowRight") next();
-    if(e.key==="ArrowLeft") prev();
+// 鍵盤支援
+document.addEventListener("keydown", e => {
+    if (e.key === "ArrowRight") next();
+    if (e.key === "ArrowLeft") prev();
 });
-
-/* =========================
-   auto click render fix
-========================= */
-setInterval(render, 1000);
 </script>
 
 </body>
