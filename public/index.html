@@ -2,30 +2,37 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Classroom v12</title>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<title>Classroom v13</title>
 
 <style>
-body { margin:0; background:black; overflow:hidden; }
+body {
+    margin:0;
+    background:black;
+    overflow:hidden;
+}
 
-canvas {
+iframe {
     width:100vw;
     height:100vh;
+    border:none;
 }
 
 #panel {
     position:fixed;
     top:0;
     width:100%;
-    background:rgba(0,0,0,0.7);
+    background:rgba(0,0,0,0.75);
     color:white;
     text-align:center;
-    padding:6px;
+    padding:8px;
     z-index:10;
 }
 
-body.fullscreen #panel { display:none; }
+body.fullscreen #panel {
+    display:none;
+}
+
+button { margin:2px; }
 </style>
 </head>
 
@@ -43,66 +50,67 @@ body.fullscreen #panel { display:none; }
 <button>Upload B</button>
 </form>
 
-<button onclick="A()">A</button>
-<button onclick="B()">B</button>
-<button onclick="next()">▶</button>
+<hr>
+
+<button onclick="setA()">A</button>
+<button onclick="setB()">B</button>
 <button onclick="prev()">◀</button>
+<button onclick="next()">▶</button>
 <button onclick="fs()">Fullscreen</button>
+<button onclick="qr()">QR</button>
 
 </div>
 
-<canvas id="pdf"></canvas>
+<iframe id="viewer"></iframe>
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
 const socket = io();
 
+/* =========================
+   state
+========================= */
 let state = {};
-let pdfDoc = null;
+let page = 1;
 
-const canvas = document.getElementById("pdf");
-const ctx = canvas.getContext("2d");
+/* ⭐ 每台設備自己的語言 */
+let version = "A";
 
-pdfjsLib.GlobalWorkerOptions.workerSrc =
-"https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-
-/* ===== state sync ===== */
-socket.on("state", async (s) => {
+/* =========================
+   sync from server
+========================= */
+socket.on("state", (s) => {
     state = s;
-
-    const file = s.active === "A" ? s.pdfA : s.pdfB;
-    if (!file) return;
-
-    if (!pdfDoc || pdfDoc.url !== file) {
-        pdfDoc = await pdfjsLib.getDocument(file).promise;
-        pdfDoc.url = file;
-    }
-
-    render(s.page);
+    page = s.page;
+    render();
 });
 
-function render(pageNum){
-    pdfDoc.getPage(pageNum).then(page => {
+/* =========================
+   render（核心）
+========================= */
+function render(){
+    const file = version === "A" ? state.pdfA : state.pdfB;
+    if (!file) return;
 
-        const viewport = page.getViewport({ scale: 1.5 });
-
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-
-        page.render({
-            canvasContext: ctx,
-            viewport: viewport
-        });
-    });
+    document.getElementById("viewer").src =
+        file + "#page=" + page;
 }
 
-/* ===== controls ===== */
+/* =========================
+   version（不同步）
+========================= */
+function setA(){ version = "A"; render(); }
+function setB(){ version = "B"; render(); }
+
+/* =========================
+   teacher sync
+========================= */
 function next(){ socket.emit("next"); }
 function prev(){ socket.emit("prev"); }
 
-function A(){ socket.emit("switch","A"); }
-function B(){ socket.emit("switch","B"); }
-
+/* =========================
+   fullscreen
+========================= */
 function fs(){
     document.documentElement.requestFullscreen();
 }
@@ -110,6 +118,26 @@ function fs(){
 document.addEventListener("fullscreenchange", ()=>{
     document.body.classList.toggle("fullscreen", !!document.fullscreenElement);
 });
+
+/* =========================
+   QR
+========================= */
+function qr(){
+    window.open("/qr");
+}
+
+/* =========================
+   keyboard
+========================= */
+document.addEventListener("keydown", e=>{
+    if(e.key==="ArrowRight") next();
+    if(e.key==="ArrowLeft") prev();
+});
+
+/* =========================
+   auto click render fix
+========================= */
+setInterval(render, 1000);
 </script>
 
 </body>
