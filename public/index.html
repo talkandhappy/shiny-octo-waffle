@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Classroom v12 (Local Language)</title>
+<title>Classroom v13 (Keyboard Control)</title>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
@@ -42,11 +42,9 @@ body.fullscreen #panel { display:none; }
         <button>Upload B</button>
     </form>
 
-    <button onclick="A()">A</button>
-    <button onclick="B()">B</button>
-    <button onclick="next()">▶</button>
-    <button onclick="prev()">◀</button>
-    <button onclick="fs()">Fullscreen</button>
+    <button onclick="A()">A版</button>
+    <button onclick="B()">B版</button>
+    <button onclick="fs()">全螢幕</button>
 </div>
 
 <canvas id="pdf"></canvas>
@@ -58,7 +56,6 @@ const socket = io();
 let state = {};
 let pdfDoc = null;
 
-// ⭐ 新增：將當前語言存在本地，預設為 A (確保上傳檔案重整後，不會跳回另一個語言)
 let localActive = localStorage.getItem("activeLang") || "A";
 
 const canvas = document.getElementById("pdf");
@@ -70,12 +67,10 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
 /* ===== state sync ===== */
 socket.on("state", (s) => {
     state = s;
-    updateView(); // 收到全域頁數更新時，刷新畫面
+    updateView();
 });
 
-// ⭐ 新增：獨立出一個負責載入/更新畫面的函數
 async function updateView() {
-    // 根據 "本地選擇的語言" 決定要渲染哪個檔案
     const file = localActive === "A" ? state.pdfA : state.pdfB;
     
     if (!file) {
@@ -94,7 +89,6 @@ async function updateView() {
 function render(pageNum){
     if (!pdfDoc) return;
 
-    // ⭐ 防錯：如果老師翻到的頁數大於目前這份簡報的總頁數，就停在最後一頁
     if (pageNum > pdfDoc.numPages) {
         pageNum = pdfDoc.numPages;
     }
@@ -115,7 +109,6 @@ function render(pageNum){
 function next(){ socket.emit("next"); }
 function prev(){ socket.emit("prev"); }
 
-// ⭐ 修改：切換語言時只改本地設定，不通知伺服器
 function A(){ 
     localActive = "A"; 
     localStorage.setItem("activeLang", "A");
@@ -134,6 +127,18 @@ function fs(){
 
 document.addEventListener("fullscreenchange", ()=>{
     document.body.classList.toggle("fullscreen", !!document.fullscreenElement);
+});
+
+/* ===== ⭐ 新增：鍵盤方向鍵監聽 ===== */
+document.addEventListener("keydown", (event) => {
+    // 避免在 input 框內打字時觸發翻頁 (雖然目前沒有文字輸入框，但這是好習慣)
+    if (event.target.tagName === "INPUT") return;
+
+    if (event.key === "ArrowRight" || event.key === "PageDown") {
+        next();
+    } else if (event.key === "ArrowLeft" || event.key === "PageUp") {
+        prev();
+    }
 });
 </script>
 
