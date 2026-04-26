@@ -2,18 +2,16 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Classroom Final</title>
+<title>Classroom v12</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
 <style>
-body {
-    margin:0;
-    background:black;
-}
+body { margin:0; background:black; overflow:hidden; }
 
-iframe {
+canvas {
     width:100vw;
     height:100vh;
-    border:none;
 }
 
 #panel {
@@ -23,13 +21,11 @@ iframe {
     background:rgba(0,0,0,0.7);
     color:white;
     text-align:center;
-    padding:8px;
+    padding:6px;
     z-index:10;
 }
 
-body.fullscreen #panel {
-    display:none;
-}
+body.fullscreen #panel { display:none; }
 </style>
 </head>
 
@@ -47,36 +43,65 @@ body.fullscreen #panel {
 <button>Upload B</button>
 </form>
 
+<button onclick="A()">A</button>
+<button onclick="B()">B</button>
 <button onclick="next()">▶</button>
 <button onclick="prev()">◀</button>
 <button onclick="fs()">Fullscreen</button>
-<button onclick="qr()">QR</button>
 
 </div>
 
-<iframe id="viewer"></iframe>
+<canvas id="pdf"></canvas>
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
 const socket = io();
 
 let state = {};
+let pdfDoc = null;
 
-socket.on("state", (s) => {
+const canvas = document.getElementById("pdf");
+const ctx = canvas.getContext("2d");
+
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+"https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+/* ===== state sync ===== */
+socket.on("state", async (s) => {
     state = s;
 
-    const file = s.pdfA || s.pdfB;
-
+    const file = s.active === "A" ? s.pdfA : s.pdfB;
     if (!file) return;
 
-    /* 🔥 核心：強制 iframe 正確 PDF 顯示 */
-    document.getElementById("viewer").src =
-        file + "#page=" + s.page;
+    if (!pdfDoc || pdfDoc.url !== file) {
+        pdfDoc = await pdfjsLib.getDocument(file).promise;
+        pdfDoc.url = file;
+    }
+
+    render(s.page);
 });
 
-/* control */
+function render(pageNum){
+    pdfDoc.getPage(pageNum).then(page => {
+
+        const viewport = page.getViewport({ scale: 1.5 });
+
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+
+        page.render({
+            canvasContext: ctx,
+            viewport: viewport
+        });
+    });
+}
+
+/* ===== controls ===== */
 function next(){ socket.emit("next"); }
 function prev(){ socket.emit("prev"); }
+
+function A(){ socket.emit("switch","A"); }
+function B(){ socket.emit("switch","B"); }
 
 function fs(){
     document.documentElement.requestFullscreen();
@@ -84,16 +109,6 @@ function fs(){
 
 document.addEventListener("fullscreenchange", ()=>{
     document.body.classList.toggle("fullscreen", !!document.fullscreenElement);
-});
-
-function qr(){
-    window.open("/qr");
-}
-
-/* keyboard */
-document.addEventListener("keydown", e=>{
-    if(e.key==="ArrowRight") next();
-    if(e.key==="ArrowLeft") prev();
 });
 </script>
 
