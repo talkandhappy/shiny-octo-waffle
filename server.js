@@ -1,68 +1,76 @@
-const socket = io();
+const express = require("express");
+const http = require("http");
+const { Server } = require("socket.io");
+const multer = require("multer");
+const path = require("path"); // 確保這行存在
+const fs = require("fs");     // 確保這行存在
 
-let state = { pdfA: null, pdfB: null, page: 1 };
-let localVersion = "A"; 
-let lastRenderedKey = ""; 
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
 
-socket.on("state", (s) => {
-    state = s;
-    document.getElementById("page-info").innerText = "Page: " + state.page;
-    render();
+// 解決部署平台沒有 uploads 資料夾的報錯
+const uploadDir = path.join(__dirname, "uploads");
+if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+app.use(express.static("public"));
+app.use("/pdf", express.static("uploads"));
+
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, "uploads/");
+    },
+    filename: (req, file, cb) => {
+        cb(null, Date.now() + "-" + file.originalname);
+    }
 });
 
-function render() {
-    const file = localVersion === "A" ? state.pdfA : state.pdfB;
-    if (!file) return;
+const upload = multer({ storage });
 
-    // 關鍵修正：使用 FitH (適應寬度) 並加上一段隨機數，強迫瀏覽器重啟 PDF 渲染
-    // 這樣可以避免它卡在兩頁中間
-    const pdfParams = `#page=${state.page}&navpanes=0&toolbar=0&view=FitH`;
-    const currentKey = file + pdfParams;
+let room = {
+    page: 1,
+    pdfA: null,
+    pdfB: null
+};
 
-    if (currentKey !== lastRenderedKey) {
-        document.getElementById("viewer").src = file + pdfParams;
-        lastRenderedKey = currentKey;
-        
-        // 修正翻頁失效：翻頁後強制把焦點回歸給視窗，鍵盤才不會失效
-        window.focus();
+app.post("/uploadA", upload.single("pdf"), (req, res) => {
+    if (req.file) {
+        room.pdfA = "/pdf/" + req.file.filename;
+        room.page = 1;
+        io.emit("state", room);
     }
-}
+    res.redirect("/");
+});
 
-function setVer(v) {
-    localVersion = v;
-    document.getElementById("btnA").classList.toggle("active-ver", v === 'A');
-    document.getElementById("btnB").classList.toggle("active-ver", v === 'B');
-    render();
-}
-
-function next() { socket.emit("next"); }
-function prev() { socket.emit("prev"); }
-
-// 鍵盤翻頁修正：增加偵測範圍
-document.addEventListener("keydown", e => {
-    if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") {
-        e.preventDefault(); // 防止網頁捲動
-        next();
+app.post("/uploadB", upload.single("pdf"), (req, res) => {
+    if (req.file) {
+        room.pdfB = "/pdf/" + req.file.filename;
+        room.page = 1;
+        io.emit("state", room);
     }
-    if (e.key === "ArrowLeft" || e.key === "PageUp") {
-        e.preventDefault();
-        prev();
-    }
-}, true); // 使用 Capture 模式確保抓到按鍵
+    res.redirect("/");
+});
 
-// 修正：當滑鼠點擊 iframe 內部後鍵盤會失效的問題
-setInterval(() => {
-    if (document.activeElement.tagName === "IFRAME") {
-        window.focus(); 
-    }
-}, 500);
+io.on("connection", (socket) => {
+    socket.emit("state", room);
+    socket.on("next", () => {
+        room.page++;
+        io.emit("state", room);
+    });
+    socket.on("prev", () => {
+        room.page = Math.max(1, room.page - 1);
+        io.emit("state", room);
+    });
+});
 
-function fs() {
-    if (!document.fullscreenElement) {
-        document.documentElement.requestFullscreen();
-    } else {
-        document.exitFullscreen();
-    }
-}
+app.get("/qr", (req, res) => {
+    const url = req.protocol + '://' + req.get('host');
+    res.send(`<html><body style="text-align:center;padding:50px;"><h2>掃描進入教室</h2><img src="https://qrserver.com{url}"><p>${url}</p></body></html>`);
+});
 
-function qr() { window.open("/qr"); }
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+    console.log("🚀 Server running on port", PORT);
+});
