@@ -1,87 +1,68 @@
-const express = require("express");
-const http = require("http");
-const { Server } = require("socket.io");
-const multer = require("multer");
-const path = require("path");
-const fs = require("fs"); // 關鍵：確保 fs 有被引入
+const socket = io();
 
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
+let state = { pdfA: null, pdfB: null, page: 1 };
+let localVersion = "A"; 
+let lastRenderedKey = ""; 
 
-// 確保 uploads 資料夾存在，否則部署在雲端會報錯
-const uploadDir = path.join(__dirname, "uploads");
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir);
+socket.on("state", (s) => {
+    state = s;
+    document.getElementById("page-info").innerText = "Page: " + state.page;
+    render();
+});
+
+function render() {
+    const file = localVersion === "A" ? state.pdfA : state.pdfB;
+    if (!file) return;
+
+    // 關鍵修正：使用 FitH (適應寬度) 並加上一段隨機數，強迫瀏覽器重啟 PDF 渲染
+    // 這樣可以避免它卡在兩頁中間
+    const pdfParams = `#page=${state.page}&navpanes=0&toolbar=0&view=FitH`;
+    const currentKey = file + pdfParams;
+
+    if (currentKey !== lastRenderedKey) {
+        document.getElementById("viewer").src = file + pdfParams;
+        lastRenderedKey = currentKey;
+        
+        // 修正翻頁失效：翻頁後強制把焦點回歸給視窗，鍵盤才不會失效
+        window.focus();
+    }
 }
 
-app.use(express.static("public"));
-app.use("/pdf", express.static("uploads"));
+function setVer(v) {
+    localVersion = v;
+    document.getElementById("btnA").classList.toggle("active-ver", v === 'A');
+    document.getElementById("btnB").classList.toggle("active-ver", v === 'B');
+    render();
+}
 
-const storage = multer.diskStorage({
-    destination: "uploads/",
-    filename: (req, file, cb) => {
-        // 使用原始檔名，避免一些編碼問題
-        cb(null, Date.now() + "-" + file.originalname);
+function next() { socket.emit("next"); }
+function prev() { socket.emit("prev"); }
+
+// 鍵盤翻頁修正：增加偵測範圍
+document.addEventListener("keydown", e => {
+    if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") {
+        e.preventDefault(); // 防止網頁捲動
+        next();
     }
-});
-
-const upload = multer({ storage });
-
-let room = {
-    page: 1,
-    pdfA: null,
-    pdfB: null
-};
-
-// 上傳 A
-app.post("/uploadA", upload.single("pdf"), (req, res) => {
-    if (req.file) {
-        room.pdfA = "/pdf/" + req.file.filename;
-        room.page = 1;
-        io.emit("state", room);
+    if (e.key === "ArrowLeft" || e.key === "PageUp") {
+        e.preventDefault();
+        prev();
     }
-    res.redirect("/");
-});
+}, true); // 使用 Capture 模式確保抓到按鍵
 
-// 上傳 B
-app.post("/uploadB", upload.single("pdf"), (req, res) => {
-    if (req.file) {
-        room.pdfB = "/pdf/" + req.file.filename;
-        room.page = 1;
-        io.emit("state", room);
+// 修正：當滑鼠點擊 iframe 內部後鍵盤會失效的問題
+setInterval(() => {
+    if (document.activeElement.tagName === "IFRAME") {
+        window.focus(); 
     }
-    res.redirect("/");
-});
+}, 500);
 
-io.on("connection", (socket) => {
-    socket.emit("state", room);
+function fs() {
+    if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen();
+    } else {
+        document.exitFullscreen();
+    }
+}
 
-    socket.on("next", () => {
-        room.page++;
-        io.emit("state", room);
-    });
-
-    socket.on("prev", () => {
-        room.page = Math.max(1, room.page - 1);
-        io.emit("state", room);
-    });
-});
-
-app.get("/qr", (req, res) => {
-    const url = req.protocol + '://' + req.get('host');
-    res.send(`
-        <html>
-        <body style="text-align:center;font-family:Arial;padding-top:50px;">
-            <h2>Classroom QR</h2>
-            <img src="https://qrserver.com{url}">
-            <p>${url}</p>
-        </body>
-        </html>
-    `);
-});
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-    console.log("🚀 Server is running on port", PORT);
-});
+function qr() { window.open("/qr"); }
