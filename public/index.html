@@ -2,70 +2,69 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Classroom v13 - Fixed</title>
+<title>Classroom v13 - Single Page Sync</title>
 <style>
-    body { margin:0; background:black; overflow:hidden; font-family: "Microsoft JhengHei", sans-serif; }
+    body { margin:0; background:#1a1a1a; overflow:hidden; font-family: "Microsoft JhengHei", sans-serif; }
     
-    /* 修正 1：計算正確高度，避免 PDF 頁面被推擠 */
+    /* 核心高度計算：確保 PDF 容器比例正確 */
     #viewer { 
         width: 100vw; 
-        height: calc(100vh - 90px); /* 扣掉上方 panel 的高度 */
+        height: calc(100vh - 85px); 
         border: none; 
         display: block;
+        background: #000;
     }
 
     #panel {
-        position: relative; /* 改為相對定位，避免壓在 iframe 上方 */
-        height: 90px;
-        background: rgba(20, 20, 20, 0.95); 
+        height: 85px;
+        background: #222; 
         color: white;
         text-align: center; 
         padding: 5px 0;
-        z-index: 10;
-        border-bottom: 1px solid #444;
+        z-index: 100;
+        border-bottom: 2px solid #444;
     }
 
-    /* 全螢幕模式下隱藏 panel 並讓 iframe 填滿 */
+    /* 全螢幕模式：隱藏控制列，讓 PDF 真正填滿 */
     body.fullscreen #panel { display: none; }
     body.fullscreen #viewer { height: 100vh; }
 
     .controls { margin-top: 5px; }
     button { 
-        padding: 6px 12px; margin: 0 3px; cursor: pointer;
-        background: #333; color: white; border: 1px solid #555; border-radius: 4px;
-        font-size: 14px;
+        padding: 8px 16px; margin: 0 5px; cursor: pointer;
+        background: #444; color: white; border: 1px solid #666; border-radius: 4px;
+        font-size: 14px; transition: 0.2s;
     }
-    button:hover { background: #555; }
+    button:hover { background: #666; border-color: #888; }
     .active-ver { background: #007bff !important; border-color: #0056b3; font-weight: bold; }
-    #page-info { margin: 0 10px; font-weight: bold; color: #ffeb3b; min-width: 80px; display: inline-block; }
+    #page-info { margin: 0 15px; font-size: 18px; font-weight: bold; color: #ffeb3b; min-width: 100px; display: inline-block; }
     hr { border: 0; border-top: 1px solid #333; margin: 5px 0; }
-    input[type="file"] { font-size: 12px; color: #ccc; }
+    form { display: inline-block; font-size: 13px; color: #aaa; }
 </style>
 </head>
 <body>
 
 <div id="panel">
-    <div style="display: flex; justify-content: center; align-items: center; gap: 15px; font-size: 13px;">
+    <div style="display: flex; justify-content: center; align-items: center; gap: 20px;">
         <form action="/uploadA" method="post" enctype="multipart/form-data">
-            A版: <input type="file" name="pdf" required> <button>上傳</button>
+            A版教材: <input type="file" name="pdf" required> <button type="submit">上傳</button>
         </form>
-        <div style="width: 1px; height: 20px; background: #555;"></div>
         <form action="/uploadB" method="post" enctype="multipart/form-data">
-            B版: <input type="file" name="pdf" required> <button>上傳</button>
+            B版教材: <input type="file" name="pdf" required> <button type="submit">上傳</button>
         </form>
     </div>
 
     <hr>
 
     <div class="controls">
-        <button id="btnA" onclick="setVer('A')" class="active-ver">看 A 版</button>
-        <button id="btnB" onclick="setVer('B')">看 B 版</button>
-        <span style="color:#555">|</span>
+        <button id="btnA" onclick="setVer('A')" class="active-ver">中文版 (A)</button>
+        <button id="btnB" onclick="setVer('B')">對照版 (B)</button>
+        <span style="color:#555; margin: 0 10px;">|</span>
         <button onclick="prev()">◀ 上一頁</button>
-        <span id="page-info">Page: 1</span>
+        <span id="page-info">第 1 頁</span>
         <button onclick="next()">下一頁 ▶</button>
-        <button onclick="fs()" style="margin-left:15px; background:#444">全螢幕</button>
-        <button onclick="qr()" style="background:#444">QR</button>
+        <button onclick="fs()" style="background:#28a745; border-color:#1e7e34; margin-left: 20px;">進入全螢幕播映</button>
+        <button onclick="qr()">QR</button>
     </div>
 </div>
 
@@ -79,9 +78,10 @@ let state = { pdfA: null, pdfB: null, page: 1 };
 let localVersion = "A"; 
 let lastRenderedKey = ""; 
 
+// 監聽後端廣播
 socket.on("state", (s) => {
     state = s;
-    document.getElementById("page-info").innerText = "Page: " + state.page;
+    document.getElementById("page-info").innerText = "第 " + state.page + " 頁";
     render();
 });
 
@@ -89,18 +89,20 @@ function render() {
     const file = localVersion === "A" ? state.pdfA : state.pdfB;
     if (!file) return;
 
-    // 修正 2：加入專用 PDF 參數
-    // #page=X          -> 跳至該頁
-    // &navpanes=0      -> 隱藏左側縮圖
-    // &toolbar=0       -> 隱藏上方黑條
-    // &view=Fit        -> 頁面完整適應高度與寬度 (防止看到下一頁)
-    const pdfParams = `#page=${state.page}&navpanes=0&toolbar=0&view=Fit`;
+    // 關鍵參數說明：
+    // #page=X      : 跳到特定頁面
+    // &view=Fit    : 讓整頁 PDF 完全塞進視窗（達成單頁顯示，不顯示下一頁頂部）
+    // &navpanes=0  : 隱藏側邊欄
+    // &toolbar=0   : 隱藏黑色工具列
+    const pdfParams = `#page=${state.page}&view=Fit&navpanes=0&toolbar=0`;
     const currentKey = file + pdfParams;
 
     if (currentKey !== lastRenderedKey) {
         document.getElementById("viewer").src = file + pdfParams;
         lastRenderedKey = currentKey;
-        console.log("Rendering:", currentKey);
+        
+        // 重要：翻頁後強制把焦點從 iframe 抓回來，鍵盤才不會失效
+        setTimeout(() => { window.focus(); }, 100);
     }
 }
 
@@ -114,6 +116,27 @@ function setVer(v) {
 function next() { socket.emit("next"); }
 function prev() { socket.emit("prev"); }
 
+// --- 實體鍵盤操控優化 ---
+document.addEventListener("keydown", e => {
+    // 支援：右方向鍵、左方向鍵、空白鍵(下一頁)、PageUp/Down
+    if (e.key === "ArrowRight" || e.key === " " || e.key === "PageDown") {
+        e.preventDefault(); 
+        next();
+    }
+    if (e.key === "ArrowLeft" || e.key === "PageUp") {
+        e.preventDefault();
+        prev();
+    }
+}, true); // 使用 true (Capture 模式) 優先攔截按鍵
+
+// 防呆機制：如果使用者點擊了 PDF 內部，焦點會消失。
+// 我們每秒檢查一次，強制把焦點拿回來給主視窗。
+setInterval(() => {
+    if (document.activeElement.tagName === "IFRAME") {
+        window.focus();
+    }
+}, 1000);
+
 function fs() {
     if (!document.fullscreenElement) {
         document.documentElement.requestFullscreen();
@@ -124,14 +147,11 @@ function fs() {
 
 document.addEventListener("fullscreenchange", () => {
     document.body.classList.toggle("fullscreen", !!document.fullscreenElement);
+    // 進入或退出全螢幕都重新渲染一次，確保比例正確
+    render(); 
 });
 
 function qr() { window.open("/qr"); }
-
-document.addEventListener("keydown", e => {
-    if (e.key === "ArrowRight") next();
-    if (e.key === "ArrowLeft") prev();
-});
 </script>
 
 </body>
