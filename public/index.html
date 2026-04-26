@@ -2,84 +2,85 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>教室同步系統 v13</title>
+<title>Classroom v13 - Final Fixed</title>
 <style>
-    body { margin:0; background:#000; overflow:hidden; font-family: "Microsoft JhengHei", sans-serif; }
+    /* 核心：把所有捲軸藏起來，強迫只看一頁 */
+    body { margin:0; background:#000; overflow:hidden; font-family: sans-serif; }
     
-    /* 讓 PDF 容器高度精確，避免捲軸出現 */
-    #viewer { 
-        width: 100vw; 
-        height: calc(100vh - 90px); 
-        border: none; 
-        display: block;
+    #viewer-container {
+        width: 100vw;
+        height: calc(100vh - 90px);
+        overflow: hidden; /* 關鍵：裁切掉下一頁 */
         background: #000;
+        display: flex;
+        justify-content: center;
+        position: relative;
+    }
+
+    #viewer { 
+        width: 100%; 
+        height: 100%; 
+        border: none;
+        /* 避免 PDF 內部的捲動 */
+        pointer-events: none; 
     }
 
     #panel {
-        height: 90px;
-        background: #1a1a1a; 
-        color: white;
-        text-align: center; 
-        padding: 5px 0;
-        z-index: 100;
-        border-bottom: 1px solid #333;
+        height: 90px; background: #1a1a1a; color: white;
+        text-align: center; padding: 5px 0; z-index: 100;
+        border-bottom: 2px solid #333;
     }
 
-    /* 全螢幕模式：完全隱藏控制列 */
     body.fullscreen #panel { display: none; }
-    body.fullscreen #viewer { height: 100vh; }
+    body.fullscreen #viewer-container { height: 100vh; }
 
     .controls { margin-top: 8px; }
     button { 
-        padding: 6px 14px; margin: 0 4px; cursor: pointer;
-        background: #333; color: white; border: 1px solid #555; border-radius: 4px;
-        font-size: 14px;
+        padding: 8px 15px; margin: 0 5px; cursor: pointer;
+        background: #333; color: white; border: 1px solid #666; border-radius: 4px;
     }
-    button:hover { background: #555; }
-    .active-ver { background: #007bff !important; border-color: #0056b3; font-weight: bold; }
-    #page-info { margin: 0 10px; font-weight: bold; color: #ffeb3b; min-width: 80px; display: inline-block; }
-    hr { border: 0; border-top: 1px solid #333; margin: 5px 0; }
-    form { display: inline-block; font-size: 12px; }
+    .active-ver { background: #007bff !important; }
+    #page-info { margin: 0 15px; font-weight: bold; color: #ffeb3b; font-size: 1.2rem; }
+    
+    /* 覆蓋層：點擊這裡也可以翻頁，且能防止 iframe 搶走焦點 */
+    #overlay {
+        position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+        z-index: 50; cursor: default;
+    }
 </style>
 </head>
 <body>
 
 <div id="panel">
-    <div style="display: flex; justify-content: center; align-items: center; gap: 15px;">
-        <form action="/uploadA" method="post" enctype="multipart/form-data">
-            A版: <input type="file" name="pdf" required> <button>上傳</button>
-        </form>
-        <div style="width:1px; height:20px; background:#444"></div>
-        <form action="/uploadB" method="post" enctype="multipart/form-data">
-            B版: <input type="file" name="pdf" required> <button>上傳</button>
-        </form>
+    <div style="display:flex; justify-content:center; gap:10px; font-size:12px;">
+        <form action="/uploadA" method="post" enctype="multipart/form-data">A版:<input type="file" name="pdf"><button>上傳</button></form>
+        <form action="/uploadB" method="post" enctype="multipart/form-data">B版:<input type="file" name="pdf"><button>上傳</button></form>
     </div>
-    <hr>
     <div class="controls">
-        <button id="btnA" onclick="setVer('A')" class="active-ver">教材 A</button>
-        <button id="btnB" onclick="setVer('B')">教材 B</button>
-        <span style="color:#555">|</span>
-        <button onclick="prev()">◀ 上一頁</button>
-        <span id="page-info">Page: 1</span>
-        <button onclick="next()">下一頁 ▶</button>
-        <button onclick="fs()" style="margin-left:20px; background:#444">全螢幕</button>
-        <button onclick="qr()">QR</button>
+        <button id="btnA" onclick="setVer('A')" class="active-ver">版本 A</button>
+        <button id="btnB" onclick="setVer('B')">版本 B</button>
+        <button onclick="prev()">◀</button>
+        <span id="page-info">1</span>
+        <button onclick="next()">▶</button>
+        <button onclick="fs()" style="background:#444">全螢幕</button>
     </div>
 </div>
 
-<iframe id="viewer"></iframe>
+<div id="viewer-container">
+    <div id="overlay"></div> <!-- 擋住 iframe，防止它搶走鍵盤焦點 -->
+    <iframe id="viewer" src=""></iframe>
+</div>
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
 const socket = io();
-
 let state = { pdfA: null, pdfB: null, page: 1 };
-let localVersion = "A"; 
-let lastRenderedKey = ""; 
+let localVersion = "A";
+let lastKey = "";
 
 socket.on("state", (s) => {
     state = s;
-    document.getElementById("page-info").innerText = "Page: " + state.page;
+    document.getElementById("page-info").innerText = "第 " + state.page + " 頁";
     render();
 });
 
@@ -87,17 +88,21 @@ function render() {
     const file = localVersion === "A" ? state.pdfA : state.pdfB;
     if (!file) return;
 
-    // 關鍵修正：使用 Fit (完整適應) 並隱藏所有 UI，防止出現下一頁邊緣
-    const pdfParams = `#page=${state.page}&navpanes=0&toolbar=0&view=Fit`;
-    const currentKey = file + pdfParams;
-
-    if (currentKey !== lastRenderedKey) {
-        document.getElementById("viewer").src = file + pdfParams;
-        lastRenderedKey = currentKey;
-        
-        // 修正翻頁失效：翻頁後讓焦點回到主視窗，鍵盤才有用
-        setTimeout(() => { window.focus(); }, 150);
+    // 終極參數：
+    // #page=X      : 頁碼
+    // &view=Fit    : 縮放到適合視窗
+    // &toolbar=0&navpanes=0 : 隱藏所有工具
+    // &scrollbar=0 : 隱藏捲軸
+    const params = `#page=${state.page}&view=Fit&toolbar=0&navpanes=0&scrollbar=0`;
+    const newKey = file + params;
+    
+    if (newKey !== lastKey) {
+        // 先清空再賦值，強迫 PDF 重新渲染在頂部
+        document.getElementById("viewer").src = file + params;
+        lastKey = newKey;
     }
+    // 強制把焦點拿回 body，確保鍵盤有效
+    document.body.focus();
 }
 
 function setVer(v) {
@@ -110,42 +115,29 @@ function setVer(v) {
 function next() { socket.emit("next"); }
 function prev() { socket.emit("prev"); }
 
-// --- 實體鍵盤監聽 ---
-document.addEventListener("keydown", e => {
-    // 支援方向鍵、空白鍵、PageDown/Up
-    if (e.key === "ArrowRight" || e.key === " " || e.key === "PageDown") {
-        e.preventDefault(); 
+// --- 鍵盤控制 (最強力攔截) ---
+window.addEventListener("keydown", (e) => {
+    if (["ArrowRight", "ArrowDown", " ", "PageDown"].includes(e.key)) {
+        e.preventDefault();
         next();
-    }
-    if (e.key === "ArrowLeft" || e.key === "PageUp") {
+    } else if (["ArrowLeft", "ArrowUp", "PageUp"].includes(e.key)) {
         e.preventDefault();
         prev();
     }
-}, true); // 使用 Capture 模式
+}, true);
 
-// 強制回收焦點機制：如果使用者點到 PDF 內部，每 1 秒抓回一次焦點
-setInterval(() => {
-    if (document.activeElement.tagName === "IFRAME") {
-        window.focus();
-    }
-}, 1000);
+// 點擊畫面任何地方都自動拿回焦點
+document.addEventListener("click", () => { document.body.focus(); });
 
 function fs() {
-    if (!document.fullscreenElement) {
-        document.documentElement.requestFullscreen();
-    } else {
-        document.exitFullscreen();
-    }
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+    else document.exitFullscreen();
 }
 
 document.addEventListener("fullscreenchange", () => {
     document.body.classList.toggle("fullscreen", !!document.fullscreenElement);
-    // 進入全螢幕後重新調整 PDF 比例
-    setTimeout(render, 300);
+    setTimeout(render, 500);
 });
-
-function qr() { window.open("/qr"); }
 </script>
-
 </body>
 </html>
