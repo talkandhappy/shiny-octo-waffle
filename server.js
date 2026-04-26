@@ -2,113 +2,130 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const multer = require("multer");
-const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
+const { execSync } = require("child_process");
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// ===== middleware =====
-app.use(cors());
 app.use(express.static("public"));
 
 const upload = multer({ dest: "uploads/" });
 
-// ===== state =====
 const room = {
     slidesA: [],
     slidesB: [],
+    currentA: 0,
+    currentB: 0,
     active: "A",
-    current: 0
+    uploadedA: false,
+    uploadedB: false
 };
 
-// ===== safe slide getter =====
-function getSlides() {
-    return room.active === "A" ? room.slidesA : room.slidesB;
+/* PDF → PNG */
+function convertPDF(filePath, tag) {
+    const dir = path.join(__dirname, "public/slides");
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+    const prefix = path.join(dir, tag + "-" + Date.now());
+    execSync(`pdftoppm -png "${filePath}" "${prefix}"`);
+
+    return fs.readdirSync(dir)
+        .filter(f => f.startsWith(tag))
+        .sort()
+        .map(f => ({ img: "/slides/" + f }));
 }
 
-// ===== fake PDF handler (避免 Render 爆) =====
-// ⚠️ 先用圖片模式，確保穩定
-function fakeConvert(file) {
-    const fileName = file.filename;
-
-    return [
-        { img: "/sample/slide1.png" },
-        { img: "/sample/slide2.png" }
-    ];
+/* emit（分離） */
+function emitSlides() {
+    io.emit("slides", {
+        A: room.slidesA,
+        B: room.slidesB
+    });
 }
 
-// ===== upload A =====
+function emitIndex() {
+    io.emit("index", {
+        A: room.currentA,
+        B: room.currentB,
+        active: room.active
+    });
+}
+
+function emitUI() {
+    io.emit("ui", {
+        uploadedA: room.uploadedA,
+        uploadedB: room.uploadedB
+    });
+}
+
+/* upload */
 app.post("/uploadA", upload.single("pdf"), (req, res) => {
-    room.slidesA = fakeConvert(req.file);
+    room.slidesA = convertPDF(req.file.path, "A");
+    room.currentA = 0;
+    room.uploadedA = true;
     room.active = "A";
-    room.current = 0;
 
-    io.emit("slides", getSlides());
-    io.emit("slide", 0);
+    emitSlides();
+    emitIndex();
+    emitUI();
 
-    console.log("📘 A uploaded");
-    res.json({ ok: true });
+    res.redirect("/");
 });
 
-// ===== upload B =====
 app.post("/uploadB", upload.single("pdf"), (req, res) => {
-    room.slidesB = fakeConvert(req.file);
+    room.slidesB = convertPDF(req.file.path, "B");
+    room.currentB = 0;
+    room.uploadedB = true;
     room.active = "B";
-    room.current = 0;
 
-    io.emit("slides", getSlides());
-    io.emit("slide", 0);
+    emitSlides();
+    emitIndex();
+    emitUI();
 
-    console.log("📗 B uploaded");
-    res.json({ ok: true });
+    res.redirect("/");
 });
 
-// ===== socket =====
+/* socket */
 io.on("connection", (socket) => {
-    console.log("user connected");
 
-    socket.emit("slides", getSlides());
-    socket.emit("slide", room.current);
+    emitSlides();
+    emitIndex();
+    emitUI();
 
     socket.on("next", () => {
-        room.current++;
-        io.emit("slide", room.current);
+        if (room.active === "A") room.currentA++;
+        else room.currentB++;
+        emitIndex();
     });
 
     socket.on("prev", () => {
-        room.current = Math.max(0, room.current - 1);
-        io.emit("slide", room.current);
+        if (room.active === "A") room.currentA = Math.max(0, room.currentA - 1);
+        else room.currentB = Math.max(0, room.currentB - 1);
+        emitIndex();
     });
 
     socket.on("switch", (type) => {
-        room.active = type;
-        room.current = 0;
-
-        io.emit("slides", getSlides());
-        io.emit("slide", 0);
+        if (type === "A" && room.uploadedA) room.active = "A";
+        if (type === "B" && room.uploadedB) room.active = "B";
+        emitIndex();
     });
 });
 
-// ===== QR endpoint =====
+/* QR */
 app.get("/qr", (req, res) => {
-    const url = "https://shiny-octo-waffle.onrender.com";
-
+    const url = `http://localhost:3000`;
     res.send(`
-        <html>
-        <body style="text-align:center;font-family:Arial;">
-            <h2>Classroom QR</h2>
-            <p>${url}</p>
-        </body>
-        </html>
+        <html><body style="text-align:center">
+        <h2>掃描進入</h2>
+        <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${url}">
+        <p>${url}</p>
+        </body></html>
     `);
 });
 
-// ===== start server =====
-const PORT = process.env.PORT || 3000;
-
-server.listen(PORT, () => {
-    console.log("🚀 running on", PORT);
+server.listen(3000, () => {
+    console.log("🚀 http://localhost:3000");
 });
