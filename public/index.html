@@ -2,21 +2,34 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>PDF Classroom</title>
+<title>Classroom v10</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
 <style>
-body { margin:0; background:black; }
-iframe {
+body {
+    margin:0;
+    background:black;
+    overflow:hidden;
+}
+
+#canvas {
     width:100vw;
     height:100vh;
-    border:none;
 }
+
 #panel {
     position:fixed;
     top:0;
     width:100%;
-    background:#111;
+    background:rgba(0,0,0,0.7);
     color:white;
     text-align:center;
+    padding:6px;
+}
+
+body.fullscreen #panel {
+    display:none;
 }
 </style>
 </head>
@@ -24,6 +37,7 @@ iframe {
 <body>
 
 <div id="panel">
+
 <form action="/uploadA" method="post" enctype="multipart/form-data">
 <input type="file" name="pdf">
 <button>Upload A</button>
@@ -34,33 +48,77 @@ iframe {
 <button>Upload B</button>
 </form>
 
-<button onclick="switchA()">A</button>
-<button onclick="switchB()">B</button>
+<button onclick="A()">A</button>
+<button onclick="B()">B</button>
+<button onclick="fs()">Fullscreen</button>
+<button onclick="qr()">QR</button>
+
 </div>
 
-<iframe id="viewer"></iframe>
+<canvas id="canvas"></canvas>
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
 const socket = io();
 
 let state = {};
+let pdfDoc = null;
 
-socket.on("pdf", (data) => {
-    state = data;
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
 
-    const file = data.active === "A" ? data.pdfA : data.pdfB;
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+"https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-    if (file) {
-        document.getElementById("viewer").src = file;
+socket.on("state", async (s) => {
+    state = s;
+
+    const file = s.active === "A" ? s.pdfA : s.pdfB;
+    const page = s.active === "A" ? s.pageA : s.pageB;
+
+    if (!file) return;
+
+    if (!pdfDoc || pdfDoc.url !== file) {
+        pdfDoc = await pdfjsLib.getDocument(file).promise;
+        pdfDoc.url = file;
     }
+
+    render(page);
 });
 
-function switchA(){
-    socket.emit("switch","A");
+function render(pageNum){
+    pdfDoc.getPage(pageNum).then(page => {
+        const viewport = page.getViewport({ scale: 1.5 });
+
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+
+        page.render({
+            canvasContext: ctx,
+            viewport: viewport
+        });
+    });
 }
-function switchB(){
-    socket.emit("switch","B");
+
+// controls
+document.addEventListener("keydown", e=>{
+    if(e.key==="ArrowRight") socket.emit("next");
+    if(e.key==="ArrowLeft") socket.emit("prev");
+});
+
+function A(){ socket.emit("switch","A"); }
+function B(){ socket.emit("switch","B"); }
+
+function fs(){
+    document.documentElement.requestFullscreen();
+}
+
+document.addEventListener("fullscreenchange", ()=>{
+    document.body.classList.toggle("fullscreen", !!document.fullscreenElement);
+});
+
+function qr(){
+    window.open("/qr");
 }
 </script>
 
