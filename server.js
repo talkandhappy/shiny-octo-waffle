@@ -19,11 +19,8 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 const room = { page: 1, pdfA: null, pdfB: null };
 
-// 上傳路由
 app.post("/uploadA", upload.single("pdf"), (req, res) => { room.pdfA = "/pdf/"+req.file.filename; room.page = 1; io.emit("state", room); res.redirect("/"); });
 app.post("/uploadB", upload.single("pdf"), (req, res) => { room.pdfB = "/pdf/"+req.file.filename; room.page = 1; io.emit("state", room); res.redirect("/"); });
-
-// 清除路由
 app.post("/clear", (req, res) => {
     if (req.body.target === "A") room.pdfA = null;
     if (req.body.target === "B") room.pdfB = null;
@@ -37,4 +34,4 @@ io.on("connection", (socket) => {
     socket.on("prev", () => { room.page = Math.max(1, room.page - 1); io.emit("state", room); });
 });
 
-server.listen(process.env.PORT || 3000, () => console.log("Server running on port 3000"));
+server.listen(process.env.PORT || 3000);
