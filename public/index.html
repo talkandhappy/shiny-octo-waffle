@@ -2,13 +2,12 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Classroom v11</title>
+<title>Classroom Final</title>
 
 <style>
 body {
     margin:0;
     background:black;
-    overflow:hidden;
 }
 
 iframe {
@@ -21,7 +20,7 @@ iframe {
     position:fixed;
     top:0;
     width:100%;
-    background:rgba(0,0,0,0.75);
+    background:rgba(0,0,0,0.7);
     color:white;
     text-align:center;
     padding:8px;
@@ -31,10 +30,6 @@ iframe {
 body.fullscreen #panel {
     display:none;
 }
-
-button {
-    margin:2px;
-}
 </style>
 </head>
 
@@ -42,7 +37,6 @@ button {
 
 <div id="panel">
 
-<!-- upload -->
 <form action="/uploadA" method="post" enctype="multipart/form-data">
 <input type="file" name="pdf">
 <button>Upload A</button>
@@ -53,61 +47,37 @@ button {
 <button>Upload B</button>
 </form>
 
-<hr>
-
-<!-- control -->
-<button onclick="setA()">A</button>
-<button onclick="setB()">B</button>
-<button onclick="prev()">◀</button>
 <button onclick="next()">▶</button>
+<button onclick="prev()">◀</button>
 <button onclick="fs()">Fullscreen</button>
 <button onclick="qr()">QR</button>
 
 </div>
 
-<iframe id="view"></iframe>
+<iframe id="viewer"></iframe>
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
 const socket = io();
 
-/* ===== 教室共享 ===== */
-let page = 1;
-let files = {};
+let state = {};
 
-// ⭐ 每台設備自己的狀態（重點）
-let version = "A";
+socket.on("state", (s) => {
+    state = s;
 
-// ===== server sync page =====
-socket.on("page", (p) => {
-    page = p;
-    render();
-});
+    const file = s.pdfA || s.pdfB;
 
-// ===== files =====
-socket.on("files", (f) => {
-    files = f;
-    render();
-});
-
-// ===== render =====
-function render(){
-    const file = version === "A" ? files.A : files.B;
     if (!file) return;
 
-    document.getElementById("view").src =
-        file + "#page=" + page;
-}
+    /* 🔥 核心：強制 iframe 正確 PDF 顯示 */
+    document.getElementById("viewer").src =
+        file + "#page=" + s.page;
+});
 
-/* ===== version（不同步）===== */
-function setA(){ version = "A"; render(); }
-function setB(){ version = "B"; render(); }
-
-/* ===== page control（同步）===== */
+/* control */
 function next(){ socket.emit("next"); }
 function prev(){ socket.emit("prev"); }
 
-/* ===== fullscreen ===== */
 function fs(){
     document.documentElement.requestFullscreen();
 }
@@ -116,12 +86,11 @@ document.addEventListener("fullscreenchange", ()=>{
     document.body.classList.toggle("fullscreen", !!document.fullscreenElement);
 });
 
-/* ===== QR ===== */
 function qr(){
     window.open("/qr");
 }
 
-/* ===== keyboard ===== */
+/* keyboard */
 document.addEventListener("keydown", e=>{
     if(e.key==="ArrowRight") next();
     if(e.key==="ArrowLeft") prev();
