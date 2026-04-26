@@ -2,34 +2,25 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Classroom Control</title>
+<title>Classroom Stable Sync</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 <style>
     body { margin:0; background:black; overflow:hidden; }
-    canvas { width:100vw; height:100vh; }
-    #panel { position:fixed; top:0; width:100%; background:rgba(0,0,0,0.8); color:white; text-align:center; padding:10px; z-index:10; font-family:sans-serif; }
+    canvas { width:100vw; height:100vh; display:block; }
+    #panel { position:fixed; top:0; width:100%; background:rgba(0,0,0,0.85); color:white; text-align:center; padding:10px; z-index:10; }
     body.fullscreen #panel { display:none; }
-    button { cursor: pointer; padding: 5px 10px; margin: 0 2px; }
-    form { display:inline-block; margin: 0 5px; }
+    button { cursor:pointer; padding:5px 10px; margin:0 2px; }
 </style>
 </head>
 <body>
 
 <div id="panel">
-    <form action="/uploadA" method="post" enctype="multipart/form-data">
-        <input type="file" name="pdf" style="width:80px;"><button>Upload A</button>
-    </form>
+    <form action="/uploadA" method="post" enctype="multipart/form-data"><input type="file" name="pdf" style="width:80px;"><button>Upload A</button></form>
     <form action="/clear" method="post"><input type="hidden" name="target" value="A"><button>刪除A</button></form>
-    
-    <form action="/uploadB" method="post" enctype="multipart/form-data">
-        <input type="file" name="pdf" style="width:80px;"><button>Upload B</button>
-    </form>
+    <form action="/uploadB" method="post" enctype="multipart/form-data"><input type="file" name="pdf" style="width:80px;"><button>Upload B</button></form>
     <form action="/clear" method="post"><input type="hidden" name="target" value="B"><button>刪除B</button></form>
-
-    <button onclick="A()">A版</button>
-    <button onclick="B()">B版</button>
-    <button onclick="fs()">全螢幕</button>
+    <button onclick="A()">A版</button> <button onclick="B()">B版</button> <button onclick="fs()">全螢幕</button>
     <img id="qr-code" style="vertical-align:middle; margin-left:15px; width:40px; height:40px; background:white; padding:2px;">
 </div>
 
@@ -38,14 +29,12 @@
 <script src="/socket.io/socket.io.js"></script>
 <script>
     const socket = io();
-    let state = {}, pdfDoc = null;
+    let state = {}, pdfDoc = null, isRendering = false, pendingPage = null;
     let localActive = localStorage.getItem("activeLang") || "A";
     const canvas = document.getElementById("pdf"), ctx = canvas.getContext("2d");
     
-    // 初始化 QR Code
-    const qr = qrcode(0, 'L');
-    qr.addData(window.location.href);
-    qr.make();
+    // QR Code 產生
+    const qr = qrcode(0, 'L'); qr.addData(window.location.href); qr.make();
     document.getElementById("qr-code").src = qr.createDataURL(4, 2);
 
     pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
@@ -62,18 +51,26 @@
         render(state.page);
     }
 
-    function render(pageNum) {
+    async function render(pageNum) {
         if (!pdfDoc) return;
+        if (isRendering) { pendingPage = pageNum; return; }
+        
+        isRendering = true;
         pageNum = Math.min(pageNum, pdfDoc.numPages);
-        pdfDoc.getPage(pageNum).then(page => {
+        
+        try {
+            const page = await pdfDoc.getPage(pageNum);
             const viewport = page.getViewport({ scale: 1.5 });
             canvas.width = viewport.width; canvas.height = viewport.height;
-            page.render({ canvasContext: ctx, viewport: viewport });
-        });
+            await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+        } catch (e) { console.error(e); }
+        
+        isRendering = false;
+        if (pendingPage !== null) { let next = pendingPage; pendingPage = null; render(next); }
     }
 
-    function A(){ localActive = "A"; localStorage.setItem("activeLang", "A"); updateView(); }
-    function B(){ localActive = "B"; localStorage.setItem("activeLang", "B"); updateView(); }
+    function A(){ localActive="A"; localStorage.setItem("activeLang","A"); updateView(); }
+    function B(){ localActive="B"; localStorage.setItem("activeLang","B"); updateView(); }
     function fs(){ document.documentElement.requestFullscreen(); }
 
     document.addEventListener("keydown", (e) => {
@@ -81,7 +78,6 @@
         if (e.key === "ArrowRight" || e.key === "PageDown") socket.emit("next");
         if (e.key === "ArrowLeft" || e.key === "PageUp") socket.emit("prev");
     });
-
     document.addEventListener("fullscreenchange", () => document.body.classList.toggle("fullscreen", !!document.fullscreenElement));
 </script>
 </body>
