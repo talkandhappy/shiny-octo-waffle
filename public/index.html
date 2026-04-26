@@ -2,72 +2,73 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Classroom v13 - Final Fixed</title>
+<title>Classroom v13 - Pro Stream</title>
 <style>
-    /* 核心：把所有捲軸藏起來，強迫只看一頁 */
     body { margin:0; background:#000; overflow:hidden; font-family: sans-serif; }
     
+    /* 1. 核心容器：用來裁切 PDF，確保絕對不會看到下一頁 */
     #viewer-container {
+        position: relative;
         width: 100vw;
         height: calc(100vh - 90px);
-        overflow: hidden; /* 關鍵：裁切掉下一頁 */
+        overflow: hidden; /* 關鍵：裁切超出範圍的內容 */
         background: #000;
-        display: flex;
-        justify-content: center;
-        position: relative;
     }
 
     #viewer { 
         width: 100%; 
         height: 100%; 
         border: none;
-        /* 避免 PDF 內部的捲動 */
+        /* 防止 PDF 內建的滑鼠行為干擾鍵盤 */
         pointer-events: none; 
+        /* 強制縮放與對齊 */
+        transform-origin: top center;
     }
 
     #panel {
-        height: 90px; background: #1a1a1a; color: white;
+        height: 90px; background: #111; color: white;
         text-align: center; padding: 5px 0; z-index: 100;
         border-bottom: 2px solid #333;
     }
 
+    /* 全螢幕樣式調整 */
     body.fullscreen #panel { display: none; }
-    body.fullscreen #viewer-container { height: 100vh; }
+    body.fullscreen #viewer-container { height: 100vh; width: 100vw; }
 
     .controls { margin-top: 8px; }
     button { 
-        padding: 8px 15px; margin: 0 5px; cursor: pointer;
+        padding: 8px 18px; margin: 0 5px; cursor: pointer; font-size: 15px;
         background: #333; color: white; border: 1px solid #666; border-radius: 4px;
     }
-    .active-ver { background: #007bff !important; }
-    #page-info { margin: 0 15px; font-weight: bold; color: #ffeb3b; font-size: 1.2rem; }
+    .active-ver { background: #007bff !important; border-color: #0056b3; }
+    #page-info { margin: 0 15px; font-weight: bold; color: #ffeb3b; font-size: 20px; }
     
-    /* 覆蓋層：點擊這裡也可以翻頁，且能防止 iframe 搶走焦點 */
+    /* 透明遮罩層：確保點擊畫面不會讓鍵盤失效 */
     #overlay {
         position: absolute; top: 0; left: 0; width: 100%; height: 100%;
         z-index: 50; cursor: default;
     }
 </style>
 </head>
-<body>
+<body tabindex="0"> <!-- 加入 tabindex 讓 body 可獲取焦點 -->
 
 <div id="panel">
-    <div style="display:flex; justify-content:center; gap:10px; font-size:12px;">
+    <div style="display:flex; justify-content:center; gap:15px; font-size:12px; color:#888;">
         <form action="/uploadA" method="post" enctype="multipart/form-data">A版:<input type="file" name="pdf"><button>上傳</button></form>
         <form action="/uploadB" method="post" enctype="multipart/form-data">B版:<input type="file" name="pdf"><button>上傳</button></form>
     </div>
     <div class="controls">
-        <button id="btnA" onclick="setVer('A')" class="active-ver">版本 A</button>
-        <button id="btnB" onclick="setVer('B')">版本 B</button>
+        <button id="btnA" onclick="setVer('A')" class="active-ver">教材 A</button>
+        <button id="btnB" onclick="setVer('B')">教材 B</button>
         <button onclick="prev()">◀</button>
         <span id="page-info">1</span>
         <button onclick="next()">▶</button>
-        <button onclick="fs()" style="background:#444">全螢幕</button>
+        <button onclick="fs()" style="background:#28a745; border:none;">進入播映全螢幕</button>
     </div>
 </div>
 
 <div id="viewer-container">
-    <div id="overlay"></div> <!-- 擋住 iframe，防止它搶走鍵盤焦點 -->
+    <div id="overlay"></div> <!-- 擋在 PDF 前面，保護鍵盤監聽 -->
     <iframe id="viewer" src=""></iframe>
 </div>
 
@@ -80,7 +81,7 @@ let lastKey = "";
 
 socket.on("state", (s) => {
     state = s;
-    document.getElementById("page-info").innerText = "第 " + state.page + " 頁";
+    document.getElementById("page-info").innerText = state.page;
     render();
 });
 
@@ -88,20 +89,16 @@ function render() {
     const file = localVersion === "A" ? state.pdfA : state.pdfB;
     if (!file) return;
 
-    // 終極參數：
-    // #page=X      : 頁碼
-    // &view=Fit    : 縮放到適合視窗
-    // &toolbar=0&navpanes=0 : 隱藏所有工具
-    // &scrollbar=0 : 隱藏捲軸
-    const params = `#page=${state.page}&view=Fit&toolbar=0&navpanes=0&scrollbar=0`;
+    // 使用 FitH (Fit Height) 在裁切容器內效果最好
+    // 加上隨機參數防止快取
+    const params = `#page=${state.page}&view=FitH&toolbar=0&navpanes=0&scrollbar=0`;
     const newKey = file + params;
     
     if (newKey !== lastKey) {
-        // 先清空再賦值，強迫 PDF 重新渲染在頂部
         document.getElementById("viewer").src = file + params;
         lastKey = newKey;
     }
-    // 強制把焦點拿回 body，確保鍵盤有效
+    // 強制焦點拿回 body，鍵盤才不會失效
     document.body.focus();
 }
 
@@ -115,29 +112,52 @@ function setVer(v) {
 function next() { socket.emit("next"); }
 function prev() { socket.emit("prev"); }
 
-// --- 鍵盤控制 (最強力攔截) ---
-window.addEventListener("keydown", (e) => {
-    if (["ArrowRight", "ArrowDown", " ", "PageDown"].includes(e.key)) {
+// --- 強化版鍵盤翻頁 ---
+function handleKey(e) {
+    if (["ArrowRight", "ArrowDown", " ", "PageDown", "Enter"].includes(e.key)) {
         e.preventDefault();
         next();
     } else if (["ArrowLeft", "ArrowUp", "PageUp"].includes(e.key)) {
         e.preventDefault();
         prev();
     }
-}, true);
+}
 
-// 點擊畫面任何地方都自動拿回焦點
-document.addEventListener("click", () => { document.body.focus(); });
+// 在 window 和 document 同時監聽，確保萬無一失
+window.addEventListener("keydown", handleKey, true);
+document.addEventListener("keydown", handleKey, true);
+
+// 每秒自動回收焦點，解決全螢幕下焦點跑掉的問題
+setInterval(() => {
+    if (document.activeElement.tagName !== "BODY") {
+        document.body.focus();
+    }
+}, 500);
 
 function fs() {
-    if (!document.fullscreenElement) document.documentElement.requestFullscreen();
-    else document.exitFullscreen();
+    const container = document.documentElement;
+    if (!document.fullscreenElement) {
+        container.requestFullscreen().catch(err => {
+            alert("全螢幕啟動失敗");
+        });
+    } else {
+        document.exitFullscreen();
+    }
 }
 
 document.addEventListener("fullscreenchange", () => {
-    document.body.classList.toggle("fullscreen", !!document.fullscreenElement);
-    setTimeout(render, 500);
+    const isFS = !!document.fullscreenElement;
+    document.body.classList.toggle("fullscreen", isFS);
+    
+    // 全螢幕切換後立刻強制焦點回歸
+    setTimeout(() => {
+        document.body.focus();
+        render(); // 重新計算顯示
+    }, 100);
 });
+
+// 初始化焦點
+window.onload = () => { document.body.focus(); };
 </script>
 </body>
 </html>
