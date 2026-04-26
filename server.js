@@ -1,40 +1,60 @@
-/* =========================
-   1. 增加資料夾自動檢查
-   避免如果沒有 uploads 資料夾會噴錯
-========================= */
-const fs = require("fs");
-if (!fs.existsSync("uploads")) {
-    fs.mkdirSync("uploads");
+const express = require("express");
+const http = require("http");
+const { Server } = require("socket.io");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs"); // 關鍵：確保 fs 有被引入
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
+
+// 確保 uploads 資料夾存在，否則部署在雲端會報錯
+const uploadDir = path.join(__dirname, "uploads");
+if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir);
 }
 
-/* =========================
-   2. 修正上傳邏輯
-   上傳新簡報時，把頁碼重置回 1 (老師通常希望換檔案就從第一頁開始)
-========================= */
+app.use(express.static("public"));
+app.use("/pdf", express.static("uploads"));
+
+const storage = multer.diskStorage({
+    destination: "uploads/",
+    filename: (req, file, cb) => {
+        // 使用原始檔名，避免一些編碼問題
+        cb(null, Date.now() + "-" + file.originalname);
+    }
+});
+
+const upload = multer({ storage });
+
+let room = {
+    page: 1,
+    pdfA: null,
+    pdfB: null
+};
+
+// 上傳 A
 app.post("/uploadA", upload.single("pdf"), (req, res) => {
     if (req.file) {
         room.pdfA = "/pdf/" + req.file.filename;
-        room.page = 1; // <--- 建議加上這行，換檔時重設頁碼
+        room.page = 1;
         io.emit("state", room);
     }
     res.redirect("/");
 });
 
+// 上傳 B
 app.post("/uploadB", upload.single("pdf"), (req, res) => {
     if (req.file) {
         room.pdfB = "/pdf/" + req.file.filename;
-        room.page = 1; // <--- 建議加上這行
+        room.page = 1;
         io.emit("state", room);
     }
     res.redirect("/");
 });
 
-/* =========================
-   3. 強化 Socket 連線
-   確保斷線重連的人能立刻拿到最新的狀態
-========================= */
 io.on("connection", (socket) => {
-    // 發送目前完整的狀態給剛進教室的人
     socket.emit("state", room);
 
     socket.on("next", () => {
@@ -43,14 +63,25 @@ io.on("connection", (socket) => {
     });
 
     socket.on("prev", () => {
-        if(room.page > 1) { // 防止頁碼小於 1
-            room.page--;
-            io.emit("state", room);
-        }
-    });
-
-    // 增加一個同步機制：萬一學生端畫面怪怪的，老師可以按按鈕強制所有人重整
-    socket.on("force_sync", () => {
+        room.page = Math.max(1, room.page - 1);
         io.emit("state", room);
     });
+});
+
+app.get("/qr", (req, res) => {
+    const url = req.protocol + '://' + req.get('host');
+    res.send(`
+        <html>
+        <body style="text-align:center;font-family:Arial;padding-top:50px;">
+            <h2>Classroom QR</h2>
+            <img src="https://qrserver.com{url}">
+            <p>${url}</p>
+        </body>
+        </html>
+    `);
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+    console.log("🚀 Server is running on port", PORT);
 });
