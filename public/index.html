@@ -2,30 +2,35 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Classroom v14</title>
+<title>Classroom Control</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 <style>
     body { margin:0; background:black; overflow:hidden; }
     canvas { width:100vw; height:100vh; }
-    #panel { position:fixed; top:0; width:100%; background:rgba(0,0,0,0.7); color:white; text-align:center; padding:10px; z-index:10; }
+    #panel { position:fixed; top:0; width:100%; background:rgba(0,0,0,0.8); color:white; text-align:center; padding:10px; z-index:10; font-family:sans-serif; }
     body.fullscreen #panel { display:none; }
-    button { cursor: pointer; padding: 5px 10px; }
+    button { cursor: pointer; padding: 5px 10px; margin: 0 2px; }
+    form { display:inline-block; margin: 0 5px; }
 </style>
 </head>
 <body>
 
 <div id="panel">
-    <form action="/uploadA" method="post" enctype="multipart/form-data" style="display:inline-block;">
-        <input type="file" name="pdf"><button>Upload A</button>
+    <form action="/uploadA" method="post" enctype="multipart/form-data">
+        <input type="file" name="pdf" style="width:80px;"><button>Upload A</button>
     </form>
-    <form action="/uploadB" method="post" enctype="multipart/form-data" style="display:inline-block;">
-        <input type="file" name="pdf"><button>Upload B</button>
+    <form action="/clear" method="post"><input type="hidden" name="target" value="A"><button>刪除A</button></form>
+    
+    <form action="/uploadB" method="post" enctype="multipart/form-data">
+        <input type="file" name="pdf" style="width:80px;"><button>Upload B</button>
     </form>
+    <form action="/clear" method="post"><input type="hidden" name="target" value="B"><button>刪除B</button></form>
+
     <button onclick="A()">A版</button>
     <button onclick="B()">B版</button>
     <button onclick="fs()">全螢幕</button>
-    <img id="qr-code" style="vertical-align:middle; margin-left:15px; width:50px; height:50px; background:white; padding:2px;">
+    <img id="qr-code" style="vertical-align:middle; margin-left:15px; width:40px; height:40px; background:white; padding:2px;">
 </div>
 
 <canvas id="pdf"></canvas>
@@ -49,7 +54,7 @@
 
     async function updateView() {
         const file = localActive === "A" ? state.pdfA : state.pdfB;
-        if (!file) return;
+        if (!file) { ctx.clearRect(0,0,canvas.width,canvas.height); return; }
         if (!pdfDoc || pdfDoc.url !== file) {
             pdfDoc = await pdfjsLib.getDocument(file).promise;
             pdfDoc.url = file;
