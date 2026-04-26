@@ -2,68 +2,67 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Classroom v13 - Single Page Sync</title>
+<title>教室同步系統 v13</title>
 <style>
-    body { margin:0; background:#1a1a1a; overflow:hidden; font-family: "Microsoft JhengHei", sans-serif; }
+    body { margin:0; background:#000; overflow:hidden; font-family: "Microsoft JhengHei", sans-serif; }
     
-    /* 核心高度計算：確保 PDF 容器比例正確 */
+    /* 讓 PDF 容器高度精確，避免捲軸出現 */
     #viewer { 
         width: 100vw; 
-        height: calc(100vh - 85px); 
+        height: calc(100vh - 90px); 
         border: none; 
         display: block;
         background: #000;
     }
 
     #panel {
-        height: 85px;
-        background: #222; 
+        height: 90px;
+        background: #1a1a1a; 
         color: white;
         text-align: center; 
         padding: 5px 0;
         z-index: 100;
-        border-bottom: 2px solid #444;
+        border-bottom: 1px solid #333;
     }
 
-    /* 全螢幕模式：隱藏控制列，讓 PDF 真正填滿 */
+    /* 全螢幕模式：完全隱藏控制列 */
     body.fullscreen #panel { display: none; }
     body.fullscreen #viewer { height: 100vh; }
 
-    .controls { margin-top: 5px; }
+    .controls { margin-top: 8px; }
     button { 
-        padding: 8px 16px; margin: 0 5px; cursor: pointer;
-        background: #444; color: white; border: 1px solid #666; border-radius: 4px;
-        font-size: 14px; transition: 0.2s;
+        padding: 6px 14px; margin: 0 4px; cursor: pointer;
+        background: #333; color: white; border: 1px solid #555; border-radius: 4px;
+        font-size: 14px;
     }
-    button:hover { background: #666; border-color: #888; }
+    button:hover { background: #555; }
     .active-ver { background: #007bff !important; border-color: #0056b3; font-weight: bold; }
-    #page-info { margin: 0 15px; font-size: 18px; font-weight: bold; color: #ffeb3b; min-width: 100px; display: inline-block; }
+    #page-info { margin: 0 10px; font-weight: bold; color: #ffeb3b; min-width: 80px; display: inline-block; }
     hr { border: 0; border-top: 1px solid #333; margin: 5px 0; }
-    form { display: inline-block; font-size: 13px; color: #aaa; }
+    form { display: inline-block; font-size: 12px; }
 </style>
 </head>
 <body>
 
 <div id="panel">
-    <div style="display: flex; justify-content: center; align-items: center; gap: 20px;">
+    <div style="display: flex; justify-content: center; align-items: center; gap: 15px;">
         <form action="/uploadA" method="post" enctype="multipart/form-data">
-            A版教材: <input type="file" name="pdf" required> <button type="submit">上傳</button>
+            A版: <input type="file" name="pdf" required> <button>上傳</button>
         </form>
+        <div style="width:1px; height:20px; background:#444"></div>
         <form action="/uploadB" method="post" enctype="multipart/form-data">
-            B版教材: <input type="file" name="pdf" required> <button type="submit">上傳</button>
+            B版: <input type="file" name="pdf" required> <button>上傳</button>
         </form>
     </div>
-
     <hr>
-
     <div class="controls">
-        <button id="btnA" onclick="setVer('A')" class="active-ver">中文版 (A)</button>
-        <button id="btnB" onclick="setVer('B')">對照版 (B)</button>
-        <span style="color:#555; margin: 0 10px;">|</span>
+        <button id="btnA" onclick="setVer('A')" class="active-ver">教材 A</button>
+        <button id="btnB" onclick="setVer('B')">教材 B</button>
+        <span style="color:#555">|</span>
         <button onclick="prev()">◀ 上一頁</button>
-        <span id="page-info">第 1 頁</span>
+        <span id="page-info">Page: 1</span>
         <button onclick="next()">下一頁 ▶</button>
-        <button onclick="fs()" style="background:#28a745; border-color:#1e7e34; margin-left: 20px;">進入全螢幕播映</button>
+        <button onclick="fs()" style="margin-left:20px; background:#444">全螢幕</button>
         <button onclick="qr()">QR</button>
     </div>
 </div>
@@ -78,10 +77,9 @@ let state = { pdfA: null, pdfB: null, page: 1 };
 let localVersion = "A"; 
 let lastRenderedKey = ""; 
 
-// 監聽後端廣播
 socket.on("state", (s) => {
     state = s;
-    document.getElementById("page-info").innerText = "第 " + state.page + " 頁";
+    document.getElementById("page-info").innerText = "Page: " + state.page;
     render();
 });
 
@@ -89,20 +87,16 @@ function render() {
     const file = localVersion === "A" ? state.pdfA : state.pdfB;
     if (!file) return;
 
-    // 關鍵參數說明：
-    // #page=X      : 跳到特定頁面
-    // &view=Fit    : 讓整頁 PDF 完全塞進視窗（達成單頁顯示，不顯示下一頁頂部）
-    // &navpanes=0  : 隱藏側邊欄
-    // &toolbar=0   : 隱藏黑色工具列
-    const pdfParams = `#page=${state.page}&view=Fit&navpanes=0&toolbar=0`;
+    // 關鍵修正：使用 Fit (完整適應) 並隱藏所有 UI，防止出現下一頁邊緣
+    const pdfParams = `#page=${state.page}&navpanes=0&toolbar=0&view=Fit`;
     const currentKey = file + pdfParams;
 
     if (currentKey !== lastRenderedKey) {
         document.getElementById("viewer").src = file + pdfParams;
         lastRenderedKey = currentKey;
         
-        // 重要：翻頁後強制把焦點從 iframe 抓回來，鍵盤才不會失效
-        setTimeout(() => { window.focus(); }, 100);
+        // 修正翻頁失效：翻頁後讓焦點回到主視窗，鍵盤才有用
+        setTimeout(() => { window.focus(); }, 150);
     }
 }
 
@@ -116,9 +110,9 @@ function setVer(v) {
 function next() { socket.emit("next"); }
 function prev() { socket.emit("prev"); }
 
-// --- 實體鍵盤操控優化 ---
+// --- 實體鍵盤監聽 ---
 document.addEventListener("keydown", e => {
-    // 支援：右方向鍵、左方向鍵、空白鍵(下一頁)、PageUp/Down
+    // 支援方向鍵、空白鍵、PageDown/Up
     if (e.key === "ArrowRight" || e.key === " " || e.key === "PageDown") {
         e.preventDefault(); 
         next();
@@ -127,10 +121,9 @@ document.addEventListener("keydown", e => {
         e.preventDefault();
         prev();
     }
-}, true); // 使用 true (Capture 模式) 優先攔截按鍵
+}, true); // 使用 Capture 模式
 
-// 防呆機制：如果使用者點擊了 PDF 內部，焦點會消失。
-// 我們每秒檢查一次，強制把焦點拿回來給主視窗。
+// 強制回收焦點機制：如果使用者點到 PDF 內部，每 1 秒抓回一次焦點
 setInterval(() => {
     if (document.activeElement.tagName === "IFRAME") {
         window.focus();
@@ -147,8 +140,8 @@ function fs() {
 
 document.addEventListener("fullscreenchange", () => {
     document.body.classList.toggle("fullscreen", !!document.fullscreenElement);
-    // 進入或退出全螢幕都重新渲染一次，確保比例正確
-    render(); 
+    // 進入全螢幕後重新調整 PDF 比例
+    setTimeout(render, 300);
 });
 
 function qr() { window.open("/qr"); }
