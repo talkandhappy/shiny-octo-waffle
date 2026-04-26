@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>v5</title>
+
+<style>
+body {
+    margin: 0;
+    background: black;
+}
+
+#slide {
+    width: 100vw;
+    height: 100vh;
+    object-fit: contain;
+}
+
+#panel {
+    background: #111;
+    padding: 10px;
+    color: white;
+    text-align: center;
+}
+
+body.fullscreen #panel {
+    display: none;
+}
+</style>
+</head>
+
+<body>
+
+<div id="panel">
+
+<h3 id="title">Upload</h3>
+
+<div id="uploadArea">
+<form action="/uploadA" method="post" enctype="multipart/form-data" id="formA">
+<input type="file" name="pdf">
+<button>Upload A</button>
+</form>
+
+<form action="/uploadB" method="post" enctype="multipart/form-data" id="formB">
+<input type="file" name="pdf">
+<button>Upload B</button>
+</form>
+</div>
+
+<hr>
+
+<button onclick="prev()">◀</button>
+<button onclick="next()">▶</button>
+<button onclick="switchA()">A</button>
+<button onclick="switchB()">B</button>
+<button onclick="fs()">Fullscreen</button>
+<button onclick="qr()">QR</button>
+
+</div>
+
+<img id="slide">
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io();
+
+/* ⭐ 雙快取（核心穩定點） */
+let slidesA = [];
+let slidesB = [];
+let indexA = 0;
+let indexB = 0;
+let active = "A";
+
+/* slides（只更新內容） */
+socket.on("slides", (data) => {
+    slidesA = data.A;
+    slidesB = data.B;
+    render();
+});
+
+/* index（只更新位置） */
+socket.on("index", (data) => {
+    indexA = data.A;
+    indexB = data.B;
+    active = data.active;
+    render();
+});
+
+/* UI */
+socket.on("ui", (ui) => {
+    document.getElementById("formA").style.display =
+        ui.uploadedA ? "none" : "block";
+
+    document.getElementById("formB").style.display =
+        ui.uploadedB ? "none" : "block";
+
+    if (ui.uploadedA && ui.uploadedB) {
+        document.getElementById("uploadArea").style.display = "none";
+        document.getElementById("title").style.display = "none";
+    }
+});
+
+/* render（純顯示，不做邏輯） */
+function render() {
+    let slides = active === "A" ? slidesA : slidesB;
+    let index = active === "A" ? indexA : indexB;
+
+    if (!slides.length) return;
+
+    document.getElementById("slide").src = slides[index].img;
+}
+
+/* 控制 */
+function next() { socket.emit("next"); }
+function prev() { socket.emit("prev"); }
+function switchA() { socket.emit("switch", "A"); }
+function switchB() { socket.emit("switch", "B"); }
+
+/* 鍵盤 */
+document.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowRight") next();
+    if (e.key === "ArrowLeft") prev();
+});
+
+/* fullscreen */
+function fs() {
+    document.documentElement.requestFullscreen();
+}
+
+document.addEventListener("fullscreenchange", () => {
+    document.body.classList.toggle("fullscreen", !!document.fullscreenElement);
+});
+
+/* QR */
+function qr() {
+    window.open("/qr");
+}
+
+/* 點擊全螢幕 */
+document.getElementById("slide").onclick = fs;
+
+</script>
+
+</body>
+</html>
