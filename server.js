@@ -4,6 +4,7 @@ const { Server } = require("socket.io");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const { fromPath } = require("pdf2pic");
 
 const app = express();
 const server = http.createServer(app);
@@ -13,7 +14,6 @@ app.use(express.static("public"));
 
 const upload = multer({ dest: "uploads/" });
 
-// ===== ROOM =====
 const room = {
     slidesA: [],
     slidesB: [],
@@ -24,23 +24,38 @@ const room = {
     uploadedB: false
 };
 
-// ===== 🔥 PDF保留（安全模式）=====
-function convertPDF(filePath, tag) {
+// ===== PDF → PNG（真正可用）=====
+async function convertPDF(filePath, tag) {
 
-    // ⚠️ Render 不做真正轉檔（避免 crash）
-    // 👉 改成 placeholder slides（穩定）
+    const outputDir = path.join(__dirname, "public/slides");
+    if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
+    }
 
-    return [
-        {
-            img: "https://via.placeholder.com/1280x720?text=" + tag + "+Slide+1"
-        },
-        {
-            img: "https://via.placeholder.com/1280x720?text=" + tag + "+Slide+2"
-        },
-        {
-            img: "https://via.placeholder.com/1280x720?text=" + tag + "+Slide+3"
+    const converter = fromPath(filePath, {
+        density: 100,
+        saveFilename: tag,
+        savePath: outputDir,
+        format: "png",
+        width: 1280,
+        height: 720
+    });
+
+    // 轉前 10 頁（教室夠用）
+    const results = [];
+
+    for (let i = 1; i <= 10; i++) {
+        try {
+            const res = await converter(i);
+            results.push({
+                img: "/slides/" + path.basename(res.path)
+            });
+        } catch (e) {
+            break;
         }
-    ];
+    }
+
+    return results;
 }
 
 // ===== emit =====
@@ -67,9 +82,9 @@ function emitUI() {
 }
 
 // ===== upload A =====
-app.post("/uploadA", upload.single("pdf"), (req, res) => {
+app.post("/uploadA", upload.single("pdf"), async (req, res) => {
 
-    room.slidesA = convertPDF(req.file.path, "A");
+    room.slidesA = await convertPDF(req.file.path, "A");
     room.currentA = 0;
     room.uploadedA = true;
     room.active = "A";
@@ -82,9 +97,9 @@ app.post("/uploadA", upload.single("pdf"), (req, res) => {
 });
 
 // ===== upload B =====
-app.post("/uploadB", upload.single("pdf"), (req, res) => {
+app.post("/uploadB", upload.single("pdf"), async (req, res) => {
 
-    room.slidesB = convertPDF(req.file.path, "B");
+    room.slidesB = await convertPDF(req.file.path, "B");
     room.currentB = 0;
     room.uploadedB = true;
     room.active = "B";
@@ -116,30 +131,29 @@ io.on("connection", (socket) => {
     });
 
     socket.on("switch", (type) => {
-        if (type === "A" && room.uploadedA) room.active = "A";
-        if (type === "B" && room.uploadedB) room.active = "B";
+        room.active = type;
         emitIndex();
     });
 });
 
-// ===== QR（正式版）=====
+// ===== QR =====
 app.get("/qr", (req, res) => {
     const url = "https://shiny-octo-waffle.onrender.com";
 
     res.send(`
         <html>
-        <body style="text-align:center;font-family:Arial">
-        <h2>教室 QR</h2>
-        <img src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${url}">
+        <body style="text-align:center">
+        <h2>QR</h2>
+        <img src="https://api.qrserver.com/v1/create-qr-code/?data=${url}&size=200x200">
         <p>${url}</p>
         </body>
         </html>
     `);
 });
 
-// ===== START =====
+// ===== start =====
 const PORT = process.env.PORT || 3000;
 
 server.listen(PORT, () => {
-    console.log("🚀 running on", PORT);
+    console.log("running on", PORT);
 });
