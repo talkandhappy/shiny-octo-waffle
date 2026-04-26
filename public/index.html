@@ -2,36 +2,55 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Classroom v13 - Sync Pro</title>
+<title>Classroom v13 - Fixed</title>
 <style>
-    body { margin:0; background:black; overflow:hidden; font-family: sans-serif; }
-    iframe { width:100vw; height:100vh; border:none; }
+    body { margin:0; background:black; overflow:hidden; font-family: "Microsoft JhengHei", sans-serif; }
+    
+    /* 修正 1：計算正確高度，避免 PDF 頁面被推擠 */
+    #viewer { 
+        width: 100vw; 
+        height: calc(100vh - 90px); /* 扣掉上方 panel 的高度 */
+        border: none; 
+        display: block;
+    }
+
     #panel {
-        position:fixed; top:0; width:100%;
-        background:rgba(0,0,0,0.8); color:white;
-        text-align:center; padding:10px 0; z-index:10;
-        transition: transform 0.3s;
+        position: relative; /* 改為相對定位，避免壓在 iframe 上方 */
+        height: 90px;
+        background: rgba(20, 20, 20, 0.95); 
+        color: white;
+        text-align: center; 
+        padding: 5px 0;
+        z-index: 10;
+        border-bottom: 1px solid #444;
     }
-    body.fullscreen #panel { transform: translateY(-100%); }
-    .controls { margin-top: 8px; }
+
+    /* 全螢幕模式下隱藏 panel 並讓 iframe 填滿 */
+    body.fullscreen #panel { display: none; }
+    body.fullscreen #viewer { height: 100vh; }
+
+    .controls { margin-top: 5px; }
     button { 
-        padding: 5px 15px; margin: 0 3px; cursor: pointer;
-        background: #444; color: white; border: 1px solid #666; border-radius: 4px;
+        padding: 6px 12px; margin: 0 3px; cursor: pointer;
+        background: #333; color: white; border: 1px solid #555; border-radius: 4px;
+        font-size: 14px;
     }
-    button:hover { background: #666; }
-    .active-ver { background: #2196F3 !important; border-color: #0d47a1; }
-    #page-info { margin-left: 10px; font-weight: bold; color: #ffeb3b; }
-    hr { border: 0; border-top: 1px solid #444; margin: 8px 0; }
+    button:hover { background: #555; }
+    .active-ver { background: #007bff !important; border-color: #0056b3; font-weight: bold; }
+    #page-info { margin: 0 10px; font-weight: bold; color: #ffeb3b; min-width: 80px; display: inline-block; }
+    hr { border: 0; border-top: 1px solid #333; margin: 5px 0; }
+    input[type="file"] { font-size: 12px; color: #ccc; }
 </style>
 </head>
 <body>
 
 <div id="panel">
-    <div style="display: flex; justify-content: center; align-items: center; gap: 20px;">
-        <form action="/uploadA" method="post" enctype="multipart/form-data" style="display:inline">
+    <div style="display: flex; justify-content: center; align-items: center; gap: 15px; font-size: 13px;">
+        <form action="/uploadA" method="post" enctype="multipart/form-data">
             A版: <input type="file" name="pdf" required> <button>上傳</button>
         </form>
-        <form action="/uploadB" method="post" enctype="multipart/form-data" style="display:inline">
+        <div style="width: 1px; height: 20px; background: #555;"></div>
+        <form action="/uploadB" method="post" enctype="multipart/form-data">
             B版: <input type="file" name="pdf" required> <button>上傳</button>
         </form>
     </div>
@@ -41,12 +60,12 @@
     <div class="controls">
         <button id="btnA" onclick="setVer('A')" class="active-ver">看 A 版</button>
         <button id="btnB" onclick="setVer('B')">看 B 版</button>
-        <span style="margin: 0 15px;">|</span>
+        <span style="color:#555">|</span>
         <button onclick="prev()">◀ 上一頁</button>
         <span id="page-info">Page: 1</span>
         <button onclick="next()">下一頁 ▶</button>
-        <button onclick="fs()" style="margin-left:20px;">全螢幕</button>
-        <button onclick="qr()">QR</button>
+        <button onclick="fs()" style="margin-left:15px; background:#444">全螢幕</button>
+        <button onclick="qr()" style="background:#444">QR</button>
     </div>
 </div>
 
@@ -56,32 +75,35 @@
 <script>
 const socket = io();
 
-// 核心狀態
 let state = { pdfA: null, pdfB: null, page: 1 };
 let localVersion = "A"; 
 let lastRenderedKey = ""; 
 
-// 監聽後端同步狀態
 socket.on("state", (s) => {
     state = s;
     document.getElementById("page-info").innerText = "Page: " + state.page;
     render();
 });
 
-// 渲染邏輯：只有在必要時才更新 iframe
 function render() {
     const file = localVersion === "A" ? state.pdfA : state.pdfB;
     if (!file) return;
 
-    const currentKey = file + "#" + state.page;
+    // 修正 2：加入專用 PDF 參數
+    // #page=X          -> 跳至該頁
+    // &navpanes=0      -> 隱藏左側縮圖
+    // &toolbar=0       -> 隱藏上方黑條
+    // &view=Fit        -> 頁面完整適應高度與寬度 (防止看到下一頁)
+    const pdfParams = `#page=${state.page}&navpanes=0&toolbar=0&view=Fit`;
+    const currentKey = file + pdfParams;
+
     if (currentKey !== lastRenderedKey) {
-        // 使用 URL Hash 控制 PDF 頁碼
-        document.getElementById("viewer").src = file + "#page=" + state.page;
+        document.getElementById("viewer").src = file + pdfParams;
         lastRenderedKey = currentKey;
+        console.log("Rendering:", currentKey);
     }
 }
 
-// 切換版本 (僅影響本地端)
 function setVer(v) {
     localVersion = v;
     document.getElementById("btnA").classList.toggle("active-ver", v === 'A');
@@ -89,11 +111,9 @@ function setVer(v) {
     render();
 }
 
-// 翻頁指令 (發送給伺服器，廣播給所有人)
 function next() { socket.emit("next"); }
 function prev() { socket.emit("prev"); }
 
-// 全螢幕切換
 function fs() {
     if (!document.fullscreenElement) {
         document.documentElement.requestFullscreen();
@@ -108,7 +128,6 @@ document.addEventListener("fullscreenchange", () => {
 
 function qr() { window.open("/qr"); }
 
-// 鍵盤支援
 document.addEventListener("keydown", e => {
     if (e.key === "ArrowRight") next();
     if (e.key === "ArrowLeft") prev();
