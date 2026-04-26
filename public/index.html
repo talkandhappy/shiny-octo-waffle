@@ -2,134 +2,140 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Classroom v13 - Final</title>
+<title>Classroom v12 (Local Language)</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
 <style>
-    body { margin:0; background:#000; overflow:hidden; font-family: sans-serif; outline: none; }
-    
-    /* 核心：裁切容器，防止看到下一頁 */
-    #viewer-container {
-        position: relative; width: 100vw; height: calc(100vh - 90px);
-        overflow: hidden; background: #000;
-    }
+body { margin:0; background:black; overflow:hidden; }
 
-    #viewer { 
-        width: 100%; height: 100%; border: none;
-        pointer-events: none; /* 防止 PDF 插件攔截按鍵 */
-    }
+canvas {
+    width:100vw;
+    height:100vh;
+}
 
-    #panel {
-        height: 90px; background: #111; color: white;
-        text-align: center; padding: 5px 0; z-index: 100;
-        border-bottom: 2px solid #333;
-    }
+#panel {
+    position:fixed;
+    top:0;
+    width:100%;
+    background:rgba(0,0,0,0.7);
+    color:white;
+    text-align:center;
+    padding:6px;
+    z-index:10;
+}
 
-    body.fullscreen #panel { display: none; }
-    body.fullscreen #viewer-container { height: 100vh; }
-
-    button { 
-        padding: 8px 18px; margin: 0 5px; cursor: pointer;
-        background: #333; color: white; border: 1px solid #666; border-radius: 4px;
-    }
-    .active-ver { background: #007bff !important; }
-    #page-info { margin: 0 15px; font-weight: bold; color: #ffeb3b; font-size: 24px; }
-    
-    /* 透明遮罩：保護鍵盤焦點 */
-    #overlay {
-        position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-        z-index: 50; cursor: default;
-    }
+body.fullscreen #panel { display:none; }
 </style>
 </head>
-<body tabindex="0"> <!-- tabindex 確保 body 可以接收按鍵 -->
+
+<body>
 
 <div id="panel">
-    <div style="display:flex; justify-content:center; gap:10px; font-size:12px; margin-bottom:5px;">
-        <form action="/uploadA" method="post" enctype="multipart/form-data">A:<input type="file" name="pdf"><button>上傳</button></form>
-        <form action="/uploadB" method="post" enctype="multipart/form-data">B:<input type="file" name="pdf"><button>上傳</button></form>
-    </div>
-    <div class="controls">
-        <button id="btnA" onclick="setVer('A')" class="active-ver">版本 A</button>
-        <button id="btnB" onclick="setVer('B')">版本 B</button>
-        <button onclick="prev()">◀</button>
-        <span id="page-info">1</span>
-        <button onclick="next()">▶</button>
-        <button onclick="fs()" style="background:#28a745;">全螢幕播映</button>
-    </div>
+    <form action="/uploadA" method="post" enctype="multipart/form-data" style="display:inline-block;">
+        <input type="file" name="pdf">
+        <button>Upload A</button>
+    </form>
+
+    <form action="/uploadB" method="post" enctype="multipart/form-data" style="display:inline-block;">
+        <input type="file" name="pdf">
+        <button>Upload B</button>
+    </form>
+
+    <button onclick="A()">A</button>
+    <button onclick="B()">B</button>
+    <button onclick="next()">▶</button>
+    <button onclick="prev()">◀</button>
+    <button onclick="fs()">Fullscreen</button>
 </div>
 
-<div id="viewer-container">
-    <div id="overlay"></div> 
-    <iframe id="viewer"></iframe>
-</div>
+<canvas id="pdf"></canvas>
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
 const socket = io();
-let state = { pdfA: null, pdfB: null, page: 1 };
-let localVer = "A";
-let lastSrc = "";
 
+let state = {};
+let pdfDoc = null;
+
+// ⭐ 新增：將當前語言存在本地，預設為 A (確保上傳檔案重整後，不會跳回另一個語言)
+let localActive = localStorage.getItem("activeLang") || "A";
+
+const canvas = document.getElementById("pdf");
+const ctx = canvas.getContext("2d");
+
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+"https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+/* ===== state sync ===== */
 socket.on("state", (s) => {
     state = s;
-    document.getElementById("page-info").innerText = state.page;
-    render();
+    updateView(); // 收到全域頁數更新時，刷新畫面
 });
 
-function render() {
-    const file = localVer === "A" ? state.pdfA : state.pdfB;
-    if (!file) return;
-
-    // 使用 Fit 參數並隱藏所有介面
-    const src = file + `#page=${state.page}&view=Fit&toolbar=0&navpanes=0`;
+// ⭐ 新增：獨立出一個負責載入/更新畫面的函數
+async function updateView() {
+    // 根據 "本地選擇的語言" 決定要渲染哪個檔案
+    const file = localActive === "A" ? state.pdfA : state.pdfB;
     
-    if (src !== lastSrc) {
-        document.getElementById("viewer").src = src;
-        lastSrc = src;
+    if (!file) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        return;
     }
-    // 每次更新都強行把焦點拉回 body
-    document.body.focus();
+
+    if (!pdfDoc || pdfDoc.url !== file) {
+        pdfDoc = await pdfjsLib.getDocument(file).promise;
+        pdfDoc.url = file;
+    }
+
+    render(state.page);
 }
 
-function setVer(v) {
-    localVer = v;
-    document.getElementById("btnA").classList.toggle("active-ver", v === 'A');
-    document.getElementById("btnB").classList.toggle("active-ver", v === 'B');
-    render();
-}
+function render(pageNum){
+    if (!pdfDoc) return;
 
-function next() { socket.emit("next"); }
-function prev() { socket.emit("prev"); }
-
-// 鍵盤翻頁邏輯 (修正版)
-document.addEventListener("keydown", e => {
-    if (["ArrowRight", "ArrowDown", " ", "PageDown", "Enter"].includes(e.key)) {
-        e.preventDefault();
-        next();
-    } else if (["ArrowLeft", "ArrowUp", "PageUp"].includes(e.key)) {
-        e.preventDefault();
-        prev();
+    // ⭐ 防錯：如果老師翻到的頁數大於目前這份簡報的總頁數，就停在最後一頁
+    if (pageNum > pdfDoc.numPages) {
+        pageNum = pdfDoc.numPages;
     }
-}, true);
 
-// 全螢幕修正：進入全螢幕後自動點擊一次畫面確保焦點
-function fs() {
-    if (!document.fullscreenElement) {
-        document.documentElement.requestFullscreen().then(() => {
-            setTimeout(() => { document.body.focus(); }, 500);
+    pdfDoc.getPage(pageNum).then(page => {
+        const viewport = page.getViewport({ scale: 1.5 });
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+
+        page.render({
+            canvasContext: ctx,
+            viewport: viewport
         });
-    } else {
-        document.exitFullscreen();
-    }
+    });
 }
 
-document.addEventListener("fullscreenchange", () => {
-    document.body.classList.toggle("fullscreen", !!document.fullscreenElement);
-    render();
-});
+/* ===== controls ===== */
+function next(){ socket.emit("next"); }
+function prev(){ socket.emit("prev"); }
 
-// 初始化：點擊畫面任何地方都會自動 focus，防止鍵盤失效
-document.addEventListener("mousedown", () => { document.body.focus(); });
-window.onload = () => { document.body.focus(); };
+// ⭐ 修改：切換語言時只改本地設定，不通知伺服器
+function A(){ 
+    localActive = "A"; 
+    localStorage.setItem("activeLang", "A");
+    updateView(); 
+}
+
+function B(){ 
+    localActive = "B"; 
+    localStorage.setItem("activeLang", "B");
+    updateView(); 
+}
+
+function fs(){
+    document.documentElement.requestFullscreen();
+}
+
+document.addEventListener("fullscreenchange", ()=>{
+    document.body.classList.toggle("fullscreen", !!document.fullscreenElement);
+});
 </script>
+
 </body>
 </html>
