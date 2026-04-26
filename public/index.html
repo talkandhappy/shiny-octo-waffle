@@ -2,83 +2,102 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>v5</title>
+<title>Classroom v7</title>
 
 <style>
 body {
     margin: 0;
     background: black;
+    overflow: hidden;
 }
 
+/* 投影片 */
 #slide {
     width: 100vw;
     height: 100vh;
     object-fit: contain;
+    background: black;
 }
 
+/* 控制面板 */
 #panel {
-    background: #111;
-    padding: 10px;
+    position: fixed;
+    top: 0;
+    width: 100%;
+    background: rgba(0,0,0,0.8);
     color: white;
     text-align: center;
+    padding: 10px;
+    z-index: 10;
 }
 
+/* 全螢幕隱藏UI */
 body.fullscreen #panel {
     display: none;
+}
+
+/* 按鈕 */
+button {
+    margin: 3px;
+    padding: 6px 10px;
 }
 </style>
 </head>
 
 <body>
 
+<!-- 控制區 -->
 <div id="panel">
 
-<h3 id="title">Upload</h3>
+<h3 id="title">Classroom Control</h3>
 
+<!-- Upload -->
 <div id="uploadArea">
 <form action="/uploadA" method="post" enctype="multipart/form-data" id="formA">
 <input type="file" name="pdf">
-<button>Upload A</button>
+<button type="submit">Upload A</button>
 </form>
 
 <form action="/uploadB" method="post" enctype="multipart/form-data" id="formB">
 <input type="file" name="pdf">
-<button>Upload B</button>
+<button type="submit">Upload B</button>
 </form>
 </div>
 
 <hr>
 
+<!-- 控制按鈕 -->
 <button onclick="prev()">◀</button>
 <button onclick="next()">▶</button>
 <button onclick="switchA()">A</button>
 <button onclick="switchB()">B</button>
-<button onclick="fs()">Fullscreen</button>
-<button onclick="qr()">QR</button>
+<button onclick="toggleFS()">Fullscreen</button>
+<button onclick="openQR()">QR</button>
 
 </div>
 
+<!-- 投影片 -->
 <img id="slide">
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
 const socket = io();
 
-/* ⭐ 雙快取（核心穩定點） */
+/* ===== state ===== */
 let slidesA = [];
 let slidesB = [];
 let indexA = 0;
 let indexB = 0;
 let active = "A";
 
-/* slides（只更新內容） */
+/* ===== update slides ===== */
 socket.on("slides", (data) => {
-    slidesA = data.A;
-    slidesB = data.B;
+    slidesA = data.A || [];
+    slidesB = data.B || [];
     render();
 });
 
-/* index（只更新位置） */
+/* ===== update index ===== */
 socket.on("index", (data) => {
     indexA = data.A;
     indexB = data.B;
@@ -86,13 +105,16 @@ socket.on("index", (data) => {
     render();
 });
 
-/* UI */
+/* ===== UI control ===== */
 socket.on("ui", (ui) => {
-    document.getElementById("formA").style.display =
-        ui.uploadedA ? "none" : "block";
 
-    document.getElementById("formB").style.display =
-        ui.uploadedB ? "none" : "block";
+    if (ui.uploadedA) {
+        document.getElementById("formA").style.display = "none";
+    }
+
+    if (ui.uploadedB) {
+        document.getElementById("formB").style.display = "none";
+    }
 
     if (ui.uploadedA && ui.uploadedB) {
         document.getElementById("uploadArea").style.display = "none";
@@ -100,44 +122,48 @@ socket.on("ui", (ui) => {
     }
 });
 
-/* render（純顯示，不做邏輯） */
+/* ===== render ===== */
 function render() {
     let slides = active === "A" ? slidesA : slidesB;
     let index = active === "A" ? indexA : indexB;
 
-    if (!slides.length) return;
+    if (!slides || slides.length === 0) return;
 
     document.getElementById("slide").src = slides[index].img;
 }
 
-/* 控制 */
+/* ===== controls ===== */
 function next() { socket.emit("next"); }
 function prev() { socket.emit("prev"); }
 function switchA() { socket.emit("switch", "A"); }
 function switchB() { socket.emit("switch", "B"); }
 
-/* 鍵盤 */
+/* ===== keyboard ===== */
 document.addEventListener("keydown", (e) => {
     if (e.key === "ArrowRight") next();
     if (e.key === "ArrowLeft") prev();
 });
 
-/* fullscreen */
-function fs() {
-    document.documentElement.requestFullscreen();
+/* ===== fullscreen ===== */
+function toggleFS() {
+    if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen();
+    } else {
+        document.exitFullscreen();
+    }
 }
 
 document.addEventListener("fullscreenchange", () => {
     document.body.classList.toggle("fullscreen", !!document.fullscreenElement);
 });
 
-/* QR */
-function qr() {
+/* ===== QR ===== */
+function openQR() {
     window.open("/qr");
 }
 
-/* 點擊全螢幕 */
-document.getElementById("slide").onclick = fs;
+/* ===== click to fullscreen ===== */
+document.getElementById("slide").onclick = toggleFS;
 
 </script>
 
